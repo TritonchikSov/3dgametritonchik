@@ -1,6 +1,7 @@
 // ===================================================
 // INIT
 // ===================================================
+var gameStarted = false;
 var scene    = new THREE.Scene();
 var camera   = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500);
 var renderer = new THREE.WebGLRenderer({ antialias:true });
@@ -133,20 +134,29 @@ scene.add(ground);
 var lakes = [];
 var lakeDefs = [{x:28,z:32,r:13},{x:-42,z:-22,r:10},{x:52,z:-48,r:12},{x:-28,z:52,r:9}];
 lakeDefs.forEach(function(def) {
-  var wy = terrainY(def.x, def.z) - 0.5;
+  // water surface sits 2.5 units below terrain — visually deep
+  var wy = terrainY(def.x, def.z) - 2.5;
   var shore = new THREE.Mesh(
-    new THREE.CylinderGeometry(def.r+3,def.r+3,0.2,32),
+    new THREE.CylinderGeometry(def.r+4,def.r+4,0.3,32),
     new THREE.MeshLambertMaterial({map:sandTex})
   );
-  shore.position.set(def.x, wy+0.05, def.z);
+  shore.position.set(def.x, wy+0.1, def.z);
   scene.add(shore);
+  // deep water cylinder — tall so walls are visible
   var water = new THREE.Mesh(
-    new THREE.CylinderGeometry(def.r,def.r,0.2,32),
-    new THREE.MeshLambertMaterial({map:waterTex,transparent:true,opacity:0.85,color:0x2288cc})
+    new THREE.CylinderGeometry(def.r,def.r,3.0,32),
+    new THREE.MeshLambertMaterial({map:waterTex,transparent:true,opacity:0.88,color:0x1166aa})
   );
-  water.position.set(def.x, wy+0.12, def.z);
+  water.position.set(def.x, wy-1.3, def.z);
   scene.add(water);
-  lakes.push({x:def.x, z:def.z, r:def.r, wy:wy+0.12});
+  // dark bottom
+  var bottom = new THREE.Mesh(
+    new THREE.CylinderGeometry(def.r-0.2,def.r-0.2,0.1,32),
+    new THREE.MeshLambertMaterial({color:0x1a3a1a})
+  );
+  bottom.position.set(def.x, wy-2.8, def.z);
+  scene.add(bottom);
+  lakes.push({x:def.x, z:def.z, r:def.r, wy:wy});
 });
 
 function getLake(x,z) {
@@ -302,8 +312,8 @@ var viewmodel = new THREE.Group();
 camera.add(viewmodel);
 scene.add(camera); // camera must be in scene for children to render
 
-// Hand (right arm stub visible in first person)
-var vmHand = mb(0.12, 0.35, 0.12, 0x3355cc);
+// Hand (right arm stub visible in first person) — pale yellow-green skin
+var vmHand = mb(0.12, 0.35, 0.12, 0xc8d87a);
 vmHand.position.set(0.28, -0.28, -0.45);
 vmHand.rotation.x = 0.2;
 viewmodel.add(vmHand);
@@ -323,27 +333,27 @@ function makeToolGeo(name) {
   }
   if (name === 'Кирка') {
     var g = new THREE.Group();
-    // handle
+    // handle — вертикально
     var handle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.04, 0.32, 0.04),
+      new THREE.BoxGeometry(0.04, 0.34, 0.04),
       new THREE.MeshLambertMaterial({map: woodTex})
     );
-    handle.position.y = 0.06;
+    handle.position.y = 0.05;
     g.add(handle);
-    // head
+    // head — горизонтально вдоль Z (смотрит вперёд)
     var head = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.05, 0.05),
+      new THREE.BoxGeometry(0.05, 0.05, 0.24),
       new THREE.MeshLambertMaterial({map: rockTex})
     );
     head.position.y = 0.22;
     g.add(head);
-    // pick tip
+    // острый кончик вперёд
     var tip = new THREE.Mesh(
       new THREE.ConeGeometry(0.025, 0.1, 6),
       new THREE.MeshLambertMaterial({map: rockTex})
     );
-    tip.rotation.z = -Math.PI/2;
-    tip.position.set(0.14, 0.22, 0);
+    tip.rotation.x = Math.PI/2;
+    tip.position.set(0, 0.22, 0.17);
     g.add(tip);
     return g;
   }
@@ -351,18 +361,25 @@ function makeToolGeo(name) {
     var g = new THREE.Group();
     // handle
     var handle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.04, 0.32, 0.04),
+      new THREE.BoxGeometry(0.04, 0.34, 0.04),
       new THREE.MeshLambertMaterial({map: woodTex})
     );
-    handle.position.y = 0.06;
+    handle.position.y = 0.05;
     g.add(handle);
-    // blade
-    var blade = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.18, 0.04),
+    // лезвие — смотрит вперёд, трапеция из двух боксов
+    var blade1 = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.20, 0.16),
       new THREE.MeshLambertMaterial({map: rockTex, color: 0xaaaaaa})
     );
-    blade.position.set(0.07, 0.24, 0);
-    g.add(blade);
+    blade1.position.set(0, 0.26, 0.08);
+    g.add(blade1);
+    // режущая кромка (тонкая полоска спереди)
+    var edge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.02, 0.22, 0.03),
+      new THREE.MeshLambertMaterial({color: 0xcccccc})
+    );
+    edge.position.set(0, 0.26, 0.17);
+    g.add(edge);
     return g;
   }
   return null;
@@ -558,7 +575,7 @@ document.addEventListener('keydown',function(e){
 document.addEventListener('keyup',function(e){keys[e.code]=false;});
 
 var yaw=0,pitch=0;
-renderer.domElement.addEventListener('click',function(){if(!invOpen)renderer.domElement.requestPointerLock();});
+renderer.domElement.addEventListener('click',function(){if(!invOpen&&gameStarted&&CTRL==='pc')renderer.domElement.requestPointerLock();});
 document.addEventListener('mousemove',function(e){
   if(document.pointerLockElement!==renderer.domElement) return;
   yaw-=e.movementX*0.002; pitch-=e.movementY*0.002;
@@ -664,6 +681,7 @@ var clock=new THREE.Clock(), walkT=0;
 function animate(){
   requestAnimationFrame(animate);
   var dt=Math.min(clock.getDelta(),0.05);
+  if(!gameStarted){ renderer.render(scene,camera); return; }
   if(cooldown>0) cooldown-=dt;
 
   if(!invOpen){
@@ -737,3 +755,97 @@ function animate(){
 }
 
 animate();
+
+// ===================================================
+// MOBILE CONTROLS
+// ===================================================
+var mobileJoy = {x:0, y:0};
+var lookActive = false, lookLastX=0, lookLastY=0;
+
+function initMobile() {
+  var zone   = document.getElementById('joystick-zone');
+  var knob   = document.getElementById('joystick-knob');
+  var look   = document.getElementById('look-zone');
+  var btnJ   = document.getElementById('btn-jump');
+  var btnA   = document.getElementById('btn-action');
+  var btnI   = document.getElementById('btn-inv');
+
+  var jActive=false, jId=-1, jOx=0, jOy=0;
+
+  zone.addEventListener('touchstart',function(e){
+    e.preventDefault();
+    var t=e.changedTouches[0];
+    jActive=true; jId=t.identifier;
+    var r=zone.getBoundingClientRect();
+    jOx=r.left+r.width/2; jOy=r.top+r.height/2;
+  },{passive:false});
+
+  zone.addEventListener('touchmove',function(e){
+    e.preventDefault();
+    for(var i=0;i<e.changedTouches.length;i++){
+      var t=e.changedTouches[i];
+      if(t.identifier!==jId) continue;
+      var dx=t.clientX-jOx, dy=t.clientY-jOy;
+      var len=Math.sqrt(dx*dx+dy*dy), max=48;
+      if(len>max){dx=dx/len*max;dy=dy/len*max;}
+      mobileJoy.x=dx/max; mobileJoy.y=dy/max;
+      knob.style.transform='translate(calc(-50% + '+dx+'px), calc(-50% + '+dy+'px))';
+    }
+  },{passive:false});
+
+  function jEnd(e){
+    e.preventDefault();
+    mobileJoy.x=0; mobileJoy.y=0;
+    knob.style.transform='translate(-50%,-50%)';
+    jActive=false;
+  }
+  zone.addEventListener('touchend',jEnd,{passive:false});
+  zone.addEventListener('touchcancel',jEnd,{passive:false});
+
+  // Look zone
+  var lId=-1;
+  look.addEventListener('touchstart',function(e){
+    e.preventDefault();
+    for(var i=0;i<e.changedTouches.length;i++){
+      var t=e.changedTouches[i];
+      var r=zone.getBoundingClientRect();
+      // ignore if touch is over joystick area
+      if(t.clientX>r.left&&t.clientX<r.right&&t.clientY>r.top&&t.clientY<r.bottom) continue;
+      if(lId===-1){lId=t.identifier;lookLastX=t.clientX;lookLastY=t.clientY;}
+    }
+  },{passive:false});
+  look.addEventListener('touchmove',function(e){
+    e.preventDefault();
+    for(var i=0;i<e.changedTouches.length;i++){
+      var t=e.changedTouches[i];
+      if(t.identifier!==lId) continue;
+      var dx=t.clientX-lookLastX, dy=t.clientY-lookLastY;
+      yaw-=dx*0.004; pitch-=dy*0.004;
+      pitch=Math.max(-1.1,Math.min(1.1,pitch));
+      lookLastX=t.clientX; lookLastY=t.clientY;
+    }
+  },{passive:false});
+  look.addEventListener('touchend',function(e){
+    for(var i=0;i<e.changedTouches.length;i++) if(e.changedTouches[i].identifier===lId) lId=-1;
+  },{passive:false});
+
+  btnJ.addEventListener('touchstart',function(e){e.preventDefault();tryJump();},{passive:false});
+  btnA.addEventListener('touchstart',function(e){e.preventDefault();tryAction();},{passive:false});
+  btnI.addEventListener('touchstart',function(e){e.preventDefault();toggleInv();},{passive:false});
+
+  // Override movement to use joystick
+  window._mobileMode = true;
+}
+
+// Patch animate to use joystick when mobile
+var _origAnimate = animate;
+// inject mobile joy into keys-like movement inside animate
+// We do it by overriding the mv calculation via mobileJoy
+// The animate loop already reads keys[], so we fake keys via joystick:
+var _mobileInterval = setInterval(function(){
+  if(!window._mobileMode) return;
+  keys['KeyW'] = mobileJoy.y < -0.2;
+  keys['KeyS'] = mobileJoy.y >  0.2;
+  keys['KeyA'] = mobileJoy.x < -0.2;
+  keys['KeyD'] = mobileJoy.x >  0.2;
+}, 16);
