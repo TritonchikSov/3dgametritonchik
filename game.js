@@ -106,23 +106,25 @@ var bushTex = makeTex(32, function(ctx, s) {
 });
 
 // ===================================================
-// TERRAIN  (island shape — edges drop below sea level)
+// TERRAIN  (island — land always above SEA_Y)
 // ===================================================
-var ISLAND_R = 80;
+var ISLAND_R = 78;
 var SEA_Y    = -1.5;
 
 function terrainY(x, z) {
   var d = Math.sqrt(x*x + z*z);
-  // smooth island falloff — coast starts at ~65, fully underwater at 85
-  var t = Math.max(0, Math.min(1, (d - 60) / 25));
-  var island = 1 - t*t*(3 - 2*t); // smoothstep
+  // smoothstep falloff: land starts dropping at r=55, hits sea at r=78
+  var t = Math.max(0, Math.min(1, (d - 55) / 23));
+  var falloff = 1 - t*t*(3 - 2*t);
   var h = 0;
   h += Math.sin(x*0.035)*Math.cos(z*0.035)*4.5;
   h += Math.sin(x*0.08+1.3)*Math.cos(z*0.07+0.9)*2.2;
   h += Math.sin(x*0.17+2.2)*Math.cos(z*0.14+1.6)*0.9;
   h += Math.sin(x*0.34)*Math.cos(z*0.31)*0.35;
-  // blend: inland = full height, coast = lerp to -3
-  h = h * island + (-3) * (1 - island);
+  // clamp base noise so inland is always above SEA_Y+0.5
+  h = Math.max(h, -0.5);
+  // apply falloff: coast blends to SEA_Y-0.5 (just below water)
+  h = h * falloff + (SEA_Y - 0.5) * (1 - falloff);
   // flatten spawn area
   var ds = Math.sqrt(x*x+z*z);
   if(ds < 12) h *= (ds/12)*(ds/12);
@@ -286,32 +288,30 @@ for(var fi=0;fi<80;fi++){
 
 // ── Blueprint item given at start — see slots[28] init in INVENTORY section
 
-// ── Paths — painted onto terrain vertices ──────────
-// We tint terrain vertices near path lines by modifying a vertex color attribute
-// Simple approach: flat dirt-colored plane segments hugging terrain exactly
-var pathMat = new THREE.MeshLambertMaterial({color:0xa07840, depthWrite:true});
-
+// ── Paths — organic dirt tiles hugging terrain ─────
+var pathTileMat = new THREE.MeshLambertMaterial({color:0x9a6830, depthWrite:true});
 var pathRoutes = [
-  [[0,0],[22,18]],
-  [[0,0],[-20,22]],
-  [[0,0],[18,-25]],
+  [[0,0],[35,30]],
+  [[0,0],[-38,28]],
+  [[0,0],[28,-40]],
 ];
-
 pathRoutes.forEach(function(route){
   var x1=route[0][0],z1=route[0][1],x2=route[1][0],z2=route[1][1];
   var dx=x2-x1, dz=z2-z1;
   var len=Math.sqrt(dx*dx+dz*dz);
   var ang=Math.atan2(dx,dz);
-  var steps=Math.ceil(len/1.2);
+  var steps=Math.ceil(len/0.9);
   for(var s=0;s<=steps;s++){
     var f=s/steps;
-    var px=x1+dx*f, pz=z1+dz*f;
+    var px=x1+dx*f + (Math.random()-0.5)*0.3;
+    var pz=z1+dz*f + (Math.random()-0.5)*0.3;
     var gy=terrainY(px,pz);
-    // thin flat quad sitting exactly on terrain
-    var seg=new THREE.Mesh(new THREE.PlaneGeometry(1.6,1.4),pathMat);
+    // vary tile size slightly for organic look
+    var tw=1.3+Math.random()*0.4, td=1.1+Math.random()*0.3;
+    var seg=new THREE.Mesh(new THREE.PlaneGeometry(tw,td),pathTileMat);
     seg.rotation.x=-Math.PI/2;
-    seg.rotation.z=ang;
-    seg.position.set(px, gy+0.03, pz);
+    seg.rotation.z=ang+(Math.random()-0.5)*0.15;
+    seg.position.set(px, gy+0.025, pz);
     seg.receiveShadow=true;
     scene.add(seg);
   }
@@ -319,51 +319,73 @@ pathRoutes.forEach(function(route){
 
 // ── Houses — 3 houses, spread far apart ────────────
 var houseDefs=[
-  {x:22,z:18,rot:0.3},
-  {x:-20,z:22,rot:-0.5},
-  {x:18,z:-25,rot:1.1},
+  {x:35,  z:30,  rot:0.0},
+  {x:-38, z:28,  rot:Math.PI*0.5},
+  {x:28,  z:-40, rot:Math.PI},
 ];
 houseDefs.forEach(function(h){ spawnHouse(h.x,h.z,h.rot); });
 
 function spawnHouse(hx,hz,rot){
   var gy=terrainY(hx,hz);
   var g=new THREE.Group();
+  var W=8, D=7, H=3.5; // width, depth, wall height
+
+  var wallMat=new THREE.MeshLambertMaterial({map:woodTex,color:0xd4a060});
+  var roofMat=new THREE.MeshLambertMaterial({color:0x7a2e08});
+  var floorMat=new THREE.MeshLambertMaterial({map:woodTex,color:0xb07840});
 
   // floor
-  var floor=new THREE.Mesh(new THREE.BoxGeometry(5,0.15,4),new THREE.MeshLambertMaterial({map:woodTex}));
-  floor.position.y=0.07; floor.receiveShadow=true; g.add(floor);
+  var fl=new THREE.Mesh(new THREE.BoxGeometry(W,0.18,D),floorMat);
+  fl.position.y=0.09; fl.receiveShadow=true; g.add(fl);
 
-  // walls
-  var wallMat=new THREE.MeshLambertMaterial({map:woodTex,color:0xc8a060});
-  // front wall with door gap
-  var wf1=new THREE.Mesh(new THREE.BoxGeometry(1.5,2,0.15),wallMat); wf1.position.set(-1.75,1.1,-2); g.add(wf1);
-  var wf2=new THREE.Mesh(new THREE.BoxGeometry(1.5,2,0.15),wallMat); wf2.position.set(1.75,1.1,-2); g.add(wf2);
-  var wf3=new THREE.Mesh(new THREE.BoxGeometry(5,0.6,0.15),wallMat); wf3.position.set(0,2.0,-2); g.add(wf3);
-  // back wall
-  var wb=new THREE.Mesh(new THREE.BoxGeometry(5,2.2,0.15),wallMat); wb.position.set(0,1.1,2); g.add(wb);
-  // side walls
-  var ws1=new THREE.Mesh(new THREE.BoxGeometry(0.15,2.2,4),wallMat); ws1.position.set(-2.5,1.1,0); g.add(ws1);
-  var ws2=new THREE.Mesh(new THREE.BoxGeometry(0.15,2.2,4),wallMat); ws2.position.set(2.5,1.1,0); g.add(ws2);
+  // back wall (solid)
+  var wb=new THREE.Mesh(new THREE.BoxGeometry(W,H,0.2),wallMat);
+  wb.position.set(0,H/2,D/2); wb.castShadow=true; g.add(wb);
 
-  // roof (two slanted panels)
-  var roofMat=new THREE.MeshLambertMaterial({color:0x8b3a10});
-  var r1=new THREE.Mesh(new THREE.BoxGeometry(5.4,0.12,2.6),roofMat);
-  r1.rotation.z=0.45; r1.position.set(-1.1,2.8,0); g.add(r1);
-  var r2=new THREE.Mesh(new THREE.BoxGeometry(5.4,0.12,2.6),roofMat);
-  r2.rotation.z=-0.45; r2.position.set(1.1,2.8,0); g.add(r2);
+  // left wall (solid)
+  var wl=new THREE.Mesh(new THREE.BoxGeometry(0.2,H,D),wallMat);
+  wl.position.set(-W/2,H/2,0); wl.castShadow=true; g.add(wl);
 
-  [wf1,wf2,wf3,wb,ws1,ws2,r1,r2].forEach(function(m){m.castShadow=true;m.receiveShadow=true;});
+  // right wall (solid)
+  var wr=new THREE.Mesh(new THREE.BoxGeometry(0.2,H,D),wallMat);
+  wr.position.set(W/2,H/2,0); wr.castShadow=true; g.add(wr);
+
+  // front wall — door gap 1.4 wide x 2.6 tall in center
+  var doorW=1.4, doorH=2.6;
+  var sideW=(W-doorW)/2;
+  var wf1=new THREE.Mesh(new THREE.BoxGeometry(sideW,H,0.2),wallMat);
+  wf1.position.set(-(doorW/2+sideW/2),H/2,-D/2); wf1.castShadow=true; g.add(wf1);
+  var wf2=new THREE.Mesh(new THREE.BoxGeometry(sideW,H,0.2),wallMat);
+  wf2.position.set(doorW/2+sideW/2,H/2,-D/2); wf2.castShadow=true; g.add(wf2);
+  var wf3=new THREE.Mesh(new THREE.BoxGeometry(doorW,H-doorH,0.2),wallMat); // above door
+  wf3.position.set(0,doorH+(H-doorH)/2,-D/2); wf3.castShadow=true; g.add(wf3);
+
+  // roof — two slanted halves
+  var roofLen=W+0.6;
+  var r1=new THREE.Mesh(new THREE.BoxGeometry(roofLen,0.15,D/2+0.4),roofMat);
+  r1.rotation.z=0.38; r1.position.set(-W/4-0.1,H+0.55,0); r1.castShadow=true; g.add(r1);
+  var r2=new THREE.Mesh(new THREE.BoxGeometry(roofLen,0.15,D/2+0.4),roofMat);
+  r2.rotation.z=-0.38; r2.position.set(W/4+0.1,H+0.55,0); r2.castShadow=true; g.add(r2);
+  // ridge
+  var ridge=new THREE.Mesh(new THREE.BoxGeometry(roofLen,0.2,0.2),roofMat);
+  ridge.position.set(0,H+1.1,0); g.add(ridge);
 
   g.position.set(hx,gy,hz);
   g.rotation.y=rot;
   scene.add(g);
 
-  // collider for house walls
-  colliders.push({x:hx,z:hz,r:3.2});
+  // 4 wall colliders (skip door side — player can walk through)
+  var cos=Math.cos(rot), sin=Math.sin(rot);
+  function wc(lx,lz,r){ colliders.push({x:hx+lx*cos-lz*sin, z:hz+lx*sin+lz*cos, r:r}); }
+  wc(0,  D/2,  0.8); // back
+  wc(-W/2, 0,  0.8); // left
+  wc( W/2, 0,  0.8); // right
+  // front sides (not center door)
+  wc(-(doorW/2+sideW/2), -D/2, 0.6);
+  wc( (doorW/2+sideW/2), -D/2, 0.6);
 
-  // spawn chest inside
-  var cx=hx+Math.cos(rot)*1.2, cz=hz+Math.sin(rot)*1.2;
-  spawnChest(cx,cz);
+  // chest inside
+  spawnChest(hx+Math.cos(rot+0.3)*2, hz+Math.sin(rot+0.3)*2);
 }
 
 // ── Chests ─────────────────────────────────────────
@@ -380,14 +402,11 @@ function spawnChest(cx,cz){
   scene.add(g);
   var obj={group:g,x:cx,z:cz,r:0.6,type:'chest',
     onHit:function(){
-      // random loot on open
-      var loot=Math.random()<0.5
-        ? {name:'Бутылка воды',icon:'🍶',count:1,water:50}
-        : {name:'Кусок мяса',icon:'🥩',count:1,food:50};
-      addItem({name:loot.name,icon:loot.icon,count:1});
-      if(loot.water) addWater(loot.water);
-      if(loot.food)  addFood(loot.food);
-      showHint('📦 '+loot.icon+' '+loot.name);
+      // always gives both water and food
+      addItem({name:'Бутылка воды',icon:'🍶',count:1});
+      addItem({name:'Кусок мяса',icon:'🥩',count:1});
+      addWater(50); addFood(50);
+      showHint('📦 🍶 Вода + 🥩 Мясо');
     }
   };
   interactables.push(obj);
@@ -568,22 +587,37 @@ var RECIPES=[
   {name:'Пол',icon:'🟫',count:4,build:true,needs:[{name:'Дерево',count:2}]},
 ];
 
-// placed build blocks
-var buildBlocks=[];
+// ── Build system ────────────────────────────────────
+var buildPreview = new THREE.Mesh(
+  new THREE.BoxGeometry(1,0.15,1),
+  new THREE.MeshLambertMaterial({color:0x8B4513, transparent:true, opacity:0.45})
+);
+buildPreview.visible = false;
+scene.add(buildPreview);
+
+var buildBlocks = [];
+
+function getBuildPos(){
+  var fwd = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  var bx = Math.round(pPos.x + fwd.x*2.2);
+  var bz = Math.round(pPos.z + fwd.z*2.2);
+  var by = terrainY(bx,bz);
+  return {x:bx, y:by, z:bz};
+}
+
 function placeBuildBlock(){
-  // place a 1x1 brown floor tile in front of player
-  var fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
-  var bx=pPos.x+fwd.x*2.5, bz=pPos.z+fwd.z*2.5;
-  var by=terrainY(bx,bz);
-  var mesh=new THREE.Mesh(
-    new THREE.BoxGeometry(1,0.12,1),
+  if(countItem('Пол') < 1){ showHint('Нет плиток Пол!'); return; }
+  var bp = getBuildPos();
+  var mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1,0.15,1),
     new THREE.MeshLambertMaterial({color:0x8B4513})
   );
-  mesh.position.set(bx,by+0.06,bz);
-  mesh.receiveShadow=true;
+  mesh.position.set(bp.x, bp.y+0.075, bp.z);
+  mesh.receiveShadow = true;
   scene.add(mesh);
   buildBlocks.push(mesh);
-  // consume 1 floor item
+  // add collider so player can walk on it
+  colliders.push({x:bp.x, z:bp.z, r:0.55});
   consumeItem('Пол',1);
   renderAll();
   showHint('🟫 Пол размещён');
@@ -904,6 +938,16 @@ function animate(){
 
   for(var i=0;i<clouds.length;i++){clouds[i].position.x+=dt*(0.4+i*0.035);if(clouds[i].position.x>85)clouds[i].position.x=-85;}
   waterTex.offset.x+=dt*0.008; waterTex.offset.y+=dt*0.004;
+  // build preview
+  var heldItem = slots[activeSlot];
+  if(!invOpen && heldItem && heldItem.build){
+    var bp = getBuildPos();
+    buildPreview.position.set(bp.x, bp.y+0.075, bp.z);
+    buildPreview.visible = true;
+  } else {
+    buildPreview.visible = false;
+  }
+
   oceanMesh.position.y = SEA_Y + Math.sin(Date.now()*0.001)*0.04;
 
   camera.position.copy(pPos);
