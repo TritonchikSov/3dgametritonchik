@@ -106,20 +106,27 @@ var bushTex = makeTex(32, function(ctx, s) {
 });
 
 // ===================================================
-// TERRAIN
+// TERRAIN  (island shape — edges drop below sea level)
 // ===================================================
+var ISLAND_R = 75; // radius of island
+var SEA_Y    = -2; // water surface Y
+
 function terrainY(x, z) {
+  var d = Math.sqrt(x*x + z*z);
+  // island falloff — outside ISLAND_R terrain goes below sea
+  var island = 1 - Math.pow(Math.max(0, d / ISLAND_R), 2.5);
   var h = 0;
-  h += Math.sin(x*0.035)*Math.cos(z*0.035)*4;
-  h += Math.sin(x*0.08+1.3)*Math.cos(z*0.07+0.9)*2;
-  h += Math.sin(x*0.17+2.2)*Math.cos(z*0.14+1.6)*0.9;
-  h += Math.sin(x*0.34)*Math.cos(z*0.31)*0.3;
-  var d = Math.sqrt(x*x+z*z);
-  if(d<14) h *= (d/14)*(d/14);
+  h += Math.sin(x*0.035)*Math.cos(z*0.035)*5;
+  h += Math.sin(x*0.08+1.3)*Math.cos(z*0.07+0.9)*2.5;
+  h += Math.sin(x*0.17+2.2)*Math.cos(z*0.14+1.6)*1.0;
+  h += Math.sin(x*0.34)*Math.cos(z*0.31)*0.4;
+  h = h * island - (1 - island) * 8; // pull edges down
+  // flatten spawn area
+  if(d < 12) h *= (d/12)*(d/12);
   return h;
 }
 
-var tGeo = new THREE.PlaneGeometry(200,200,80,80);
+var tGeo = new THREE.PlaneGeometry(300,300,100,100);
 tGeo.rotateX(-Math.PI/2);
 var tp = tGeo.attributes.position;
 for(var i=0;i<tp.count;i++) tp.setY(i, terrainY(tp.getX(i), tp.getZ(i)));
@@ -128,42 +135,30 @@ var ground = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({map:grassTex}))
 ground.receiveShadow = true;
 scene.add(ground);
 
-// ===================================================
-// LAKES
-// ===================================================
-var lakes = [];
-var lakeDefs = [{x:28,z:32,r:13},{x:-42,z:-22,r:10},{x:52,z:-48,r:12},{x:-28,z:52,r:9}];
-lakeDefs.forEach(function(def) {
-  // water surface sits 2.5 units below terrain — visually deep
-  var wy = terrainY(def.x, def.z) - 2.5;
-  var shore = new THREE.Mesh(
-    new THREE.CylinderGeometry(def.r+4,def.r+4,0.3,32),
-    new THREE.MeshLambertMaterial({map:sandTex})
-  );
-  shore.position.set(def.x, wy+0.1, def.z);
-  scene.add(shore);
-  // deep water cylinder — tall so walls are visible
-  var water = new THREE.Mesh(
-    new THREE.CylinderGeometry(def.r,def.r,3.0,32),
-    new THREE.MeshLambertMaterial({map:waterTex,transparent:true,opacity:0.88,color:0x1166aa})
-  );
-  water.position.set(def.x, wy-1.3, def.z);
-  scene.add(water);
-  // dark bottom
-  var bottom = new THREE.Mesh(
-    new THREE.CylinderGeometry(def.r-0.2,def.r-0.2,0.1,32),
-    new THREE.MeshLambertMaterial({color:0x1a3a1a})
-  );
-  bottom.position.set(def.x, wy-2.8, def.z);
-  scene.add(bottom);
-  lakes.push({x:def.x, z:def.z, r:def.r, wy:wy});
-});
+// ── Ocean ──────────────────────────────────────────
+var oceanMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(600, 600, 1, 1),
+  new THREE.MeshLambertMaterial({map:waterTex, transparent:true, opacity:0.88, color:0x1166aa})
+);
+oceanMesh.rotation.x = -Math.PI/2;
+oceanMesh.position.y = SEA_Y;
+scene.add(oceanMesh);
 
-function getLake(x,z) {
-  for(var i=0;i<lakes.length;i++) {
-    var l=lakes[i];
-    if(Math.sqrt((x-l.x)*(x-l.x)+(z-l.z)*(z-l.z))<l.r) return l;
-  }
+// Sandy beach ring around island edge
+var beachMesh = new THREE.Mesh(
+  new THREE.RingGeometry(ISLAND_R - 8, ISLAND_R + 4, 64),
+  new THREE.MeshLambertMaterial({map:sandTex, side:THREE.DoubleSide})
+);
+beachMesh.rotation.x = -Math.PI/2;
+beachMesh.position.y = SEA_Y + 0.05;
+scene.add(beachMesh);
+
+// ── No lakes — ocean is the water source ──────────
+var lakes = [];
+function getLake(x, z) {
+  // standing near shore (outside island) counts as water
+  var d = Math.sqrt(x*x + z*z);
+  if (d > ISLAND_R - 6) return {wy: SEA_Y};
   return null;
 }
 
@@ -245,34 +240,128 @@ function spawnCloud(x,y,z) {
   g.position.set(x,y,z); scene.add(g); return g;
 }
 
-function awayFromLakes(x,z,pad) {
-  for(var i=0;i<lakes.length;i++) {
-    var l=lakes[i];
-    if(Math.sqrt((x-l.x)*(x-l.x)+(z-l.z)*(z-l.z))<l.r+pad) return false;
-  }
-  return true;
-}
+function onIsland(x,z,pad){ return Math.sqrt(x*x+z*z) < ISLAND_R - (pad||8); }
 
 // populate
-for(var i=0;i<70;i++){
+for(var i=0;i<65;i++){
   var x,z,t=0;
-  do{x=(Math.random()-.5)*160;z=(Math.random()-.5)*160;t++;}
-  while((Math.sqrt(x*x+z*z)<7||!awayFromLakes(x,z,3))&&t<40);
+  do{x=(Math.random()-.5)*140;z=(Math.random()-.5)*140;t++;}
+  while((!onIsland(x,z,10)||Math.sqrt(x*x+z*z)<7)&&t<40);
   spawnTree(x,z);
 }
-for(var i=0;i<40;i++){
+for(var i=0;i<35;i++){
   var x,z,t=0;
-  do{x=(Math.random()-.5)*160;z=(Math.random()-.5)*160;t++;}
-  while((Math.sqrt(x*x+z*z)<5||!awayFromLakes(x,z,2))&&t<40);
+  do{x=(Math.random()-.5)*130;z=(Math.random()-.5)*130;t++;}
+  while((!onIsland(x,z,10)||Math.sqrt(x*x+z*z)<5)&&t<40);
   spawnRock(x,z);
 }
-for(var i=0;i<30;i++){
+for(var i=0;i<28;i++){
   var x,z,t=0;
-  do{x=(Math.random()-.5)*150;z=(Math.random()-.5)*150;t++;}
-  while((Math.sqrt(x*x+z*z)<4||!awayFromLakes(x,z,2))&&t<40);
+  do{x=(Math.random()-.5)*120;z=(Math.random()-.5)*120;t++;}
+  while((!onIsland(x,z,10)||Math.sqrt(x*x+z*z)<4)&&t<40);
   spawnBush(x,z);
 }
 [[-3,4],[4,-3],[6,2],[-5,-4],[2,7],[-7,2],[5,5]].forEach(function(p){spawnStone(p[0],p[1]);});
+
+// ── Paths (dirt strips) ────────────────────────────
+var pathMat = new THREE.MeshLambertMaterial({map:sandTex, color:0xb8955a});
+var pathDefs = [
+  {x1:0,z1:0, x2:30,z2:20},
+  {x1:0,z1:0, x2:-25,z2:25},
+  {x1:0,z1:0, x2:20,z2:-30},
+  {x1:30,z1:20, x2:45,z2:10},
+];
+pathDefs.forEach(function(p){
+  var dx=p.x2-p.x1, dz=p.z2-p.z1;
+  var len=Math.sqrt(dx*dx+dz*dz);
+  var segs=Math.ceil(len/2);
+  for(var s=0;s<segs;s++){
+    var t=s/segs;
+    var px=p.x1+dx*t, pz=p.z1+dz*t;
+    var gy=terrainY(px,pz);
+    var seg=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.08,2.2),pathMat);
+    seg.position.set(px,gy+0.02,pz);
+    seg.rotation.y=Math.atan2(dx,dz);
+    seg.receiveShadow=true;
+    scene.add(seg);
+  }
+});
+
+// ── Houses ─────────────────────────────────────────
+var houseDefs=[
+  {x:30,z:20,rot:0.3},
+  {x:-25,z:25,rot:-0.5},
+  {x:20,z:-30,rot:1.1},
+  {x:45,z:10,rot:0.0},
+];
+houseDefs.forEach(function(h){ spawnHouse(h.x,h.z,h.rot); });
+
+function spawnHouse(hx,hz,rot){
+  var gy=terrainY(hx,hz);
+  var g=new THREE.Group();
+
+  // floor
+  var floor=new THREE.Mesh(new THREE.BoxGeometry(5,0.15,4),new THREE.MeshLambertMaterial({map:woodTex}));
+  floor.position.y=0.07; floor.receiveShadow=true; g.add(floor);
+
+  // walls
+  var wallMat=new THREE.MeshLambertMaterial({map:woodTex,color:0xc8a060});
+  // front wall with door gap
+  var wf1=new THREE.Mesh(new THREE.BoxGeometry(1.5,2,0.15),wallMat); wf1.position.set(-1.75,1.1,-2); g.add(wf1);
+  var wf2=new THREE.Mesh(new THREE.BoxGeometry(1.5,2,0.15),wallMat); wf2.position.set(1.75,1.1,-2); g.add(wf2);
+  var wf3=new THREE.Mesh(new THREE.BoxGeometry(5,0.6,0.15),wallMat); wf3.position.set(0,2.0,-2); g.add(wf3);
+  // back wall
+  var wb=new THREE.Mesh(new THREE.BoxGeometry(5,2.2,0.15),wallMat); wb.position.set(0,1.1,2); g.add(wb);
+  // side walls
+  var ws1=new THREE.Mesh(new THREE.BoxGeometry(0.15,2.2,4),wallMat); ws1.position.set(-2.5,1.1,0); g.add(ws1);
+  var ws2=new THREE.Mesh(new THREE.BoxGeometry(0.15,2.2,4),wallMat); ws2.position.set(2.5,1.1,0); g.add(ws2);
+
+  // roof (two slanted panels)
+  var roofMat=new THREE.MeshLambertMaterial({color:0x8b3a10});
+  var r1=new THREE.Mesh(new THREE.BoxGeometry(5.4,0.12,2.6),roofMat);
+  r1.rotation.z=0.45; r1.position.set(-1.1,2.8,0); g.add(r1);
+  var r2=new THREE.Mesh(new THREE.BoxGeometry(5.4,0.12,2.6),roofMat);
+  r2.rotation.z=-0.45; r2.position.set(1.1,2.8,0); g.add(r2);
+
+  [wf1,wf2,wf3,wb,ws1,ws2,r1,r2].forEach(function(m){m.castShadow=true;m.receiveShadow=true;});
+
+  g.position.set(hx,gy,hz);
+  g.rotation.y=rot;
+  scene.add(g);
+
+  // collider for house walls
+  colliders.push({x:hx,z:hz,r:3.2});
+
+  // spawn chest inside
+  var cx=hx+Math.cos(rot)*1.2, cz=hz+Math.sin(rot)*1.2;
+  spawnChest(cx,cz);
+}
+
+// ── Chests ─────────────────────────────────────────
+function spawnChest(cx,cz){
+  var gy=terrainY(cx,cz);
+  var g=new THREE.Group();
+  var body=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.5,0.5),new THREE.MeshLambertMaterial({map:woodTex,color:0xc8a060}));
+  body.position.y=0.25; body.castShadow=true; g.add(body);
+  var lid=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.18,0.5),new THREE.MeshLambertMaterial({color:0x8b5a20}));
+  lid.position.y=0.59; lid.castShadow=true; g.add(lid);
+  var lock=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.12,0.06),new THREE.MeshLambertMaterial({color:0xddaa00}));
+  lock.position.set(0,0.5,-0.28); g.add(lock);
+  g.position.set(cx,gy,cz);
+  scene.add(g);
+  var loot=Math.random()<0.5
+    ? {name:'Бутылка воды',icon:'🍶',count:1,water:50}
+    : {name:'Кусок мяса',icon:'🥩',count:1,food:50};
+  var obj={group:g,x:cx,z:cz,r:0.6,type:'chest',loot:loot,
+    onHit:function(){
+      addItem({name:loot.name,icon:loot.icon,count:1});
+      if(loot.water) addWater(loot.water);
+      if(loot.food)  addFood(loot.food);
+      showHint('📦 '+loot.icon+' '+loot.name);
+    }
+  };
+  interactables.push(obj);
+}
 
 var clouds=[];
 for(var i=0;i<18;i++) clouds.push(spawnCloud((Math.random()-.5)*160,16+Math.random()*10,(Math.random()-.5)*160));
@@ -312,10 +401,10 @@ var viewmodel = new THREE.Group();
 camera.add(viewmodel);
 scene.add(camera); // camera must be in scene for children to render
 
-// Hand (right arm stub visible in first person) — pale yellow-green skin
+// Hand — pale yellow-green, pointing forward (rotation.x = 0)
 var vmHand = mb(0.12, 0.35, 0.12, 0xc8d87a);
-vmHand.position.set(0.28, -0.28, -0.45);
-vmHand.rotation.x = 0.2;
+vmHand.position.set(0.28, -0.30, -0.42);
+vmHand.rotation.x = 0;
 viewmodel.add(vmHand);
 
 // Tool meshes for viewmodel
@@ -359,26 +448,26 @@ function makeToolGeo(name) {
   }
   if (name === 'Топор') {
     var g = new THREE.Group();
-    // handle
+    // handle — вертикально вдоль Y
     var handle = new THREE.Mesh(
       new THREE.BoxGeometry(0.04, 0.34, 0.04),
       new THREE.MeshLambertMaterial({map: woodTex})
     );
     handle.position.y = 0.05;
     g.add(handle);
-    // лезвие — смотрит вперёд, трапеция из двух боксов
-    var blade1 = new THREE.Mesh(
-      new THREE.BoxGeometry(0.04, 0.20, 0.16),
+    // лезвие — широкое, смотрит вперёд (вдоль -Z)
+    var blade = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.22, 0.18),
       new THREE.MeshLambertMaterial({map: rockTex, color: 0xaaaaaa})
     );
-    blade1.position.set(0, 0.26, 0.08);
-    g.add(blade1);
-    // режущая кромка (тонкая полоска спереди)
+    blade.position.set(0, 0.27, -0.07);
+    g.add(blade);
+    // режущая кромка — тонкая, спереди
     var edge = new THREE.Mesh(
-      new THREE.BoxGeometry(0.02, 0.22, 0.03),
-      new THREE.MeshLambertMaterial({color: 0xcccccc})
+      new THREE.BoxGeometry(0.02, 0.24, 0.03),
+      new THREE.MeshLambertMaterial({color: 0xdddddd})
     );
-    edge.position.set(0, 0.26, 0.17);
+    edge.position.set(0, 0.27, -0.17);
     g.add(edge);
     return g;
   }
@@ -395,8 +484,8 @@ function updateViewmodel() {
   vmHand.visible = true;
   var g = makeToolGeo(h.name);
   if (g) {
-    g.position.set(0.28, -0.18, -0.45);
-    g.rotation.set(0.3, 0.1, 0.1);
+    g.position.set(0.28, -0.30, -0.42);
+    g.rotation.set(0, 0, 0);
     viewmodel.add(g);
     vmTool = g;
   }
@@ -637,6 +726,11 @@ function tryAction(){
   if(cooldown>0) return;
   var obj=getAimed(); if(!obj) return;
 
+  if(obj.type==='chest'){
+    obj.onHit();
+    var bx=obj.x,bz=obj.z; removeObj(obj);
+    cooldown=0.4; swingT=1; return;
+  }
   if(obj.type==='pickup'){
     addItem({name:'Камень',icon:'🪨',count:1});
     scene.remove(obj.mesh);
@@ -669,7 +763,7 @@ function tryAction(){
 var hintTick=0;
 function updateHint(){
   var obj=getAimed(); if(!obj) return;
-  var map={tree:'🪵 ЛКМ — рубить (Кремень/Топор)',rock:'🪨 ЛКМ — добыть (Кремень/Кирка)',bush:'🍓 ЛКМ — съесть ягоды',pickup:'🪨 ЛКМ — подобрать камень'};
+  var map={tree:'🪵 ЛКМ — рубить (Кремень/Топор)',rock:'🪨 ЛКМ — добыть (Кремень/Кирка)',bush:'🍓 ЛКМ — съесть ягоды',pickup:'🪨 ЛКМ — подобрать камень',chest:'📦 ЛКМ — открыть ящик'};
   if(map[obj.type]) showHint(map[obj.type]);
 }
 
@@ -733,12 +827,15 @@ function animate(){
     if(swingT>0){
       swingT=Math.max(0,swingT-dt*5);
       pRArm.rotation.x=-Math.sin(swingT*Math.PI)*1.5;
-      // viewmodel swing
-      if(vmTool) vmTool.rotation.x = 0.3 + Math.sin(swingT*Math.PI)*1.2;
-      vmHand.rotation.x = 0.2 + Math.sin(swingT*Math.PI)*1.2;
+      // viewmodel swing — качаем вниз-вперёд
+      var sw=Math.sin(swingT*Math.PI);
+      vmHand.position.y = -0.30 - sw*0.12;
+      vmHand.position.z = -0.42 - sw*0.06;
+      if(vmTool){ vmTool.position.y = -0.30 - sw*0.12; vmTool.position.z = -0.42 - sw*0.06; }
     } else {
-      if(vmTool) vmTool.rotation.x = THREE.MathUtils.lerp(vmTool.rotation.x||0.3, 0.3, 0.15);
-      vmHand.rotation.x = THREE.MathUtils.lerp(vmHand.rotation.x, 0.2, 0.15);
+      vmHand.position.y = THREE.MathUtils.lerp(vmHand.position.y, -0.30, 0.18);
+      vmHand.position.z = THREE.MathUtils.lerp(vmHand.position.z, -0.42, 0.18);
+      if(vmTool){ vmTool.position.y = THREE.MathUtils.lerp(vmTool.position.y, -0.30, 0.18); vmTool.position.z = THREE.MathUtils.lerp(vmTool.position.z, -0.42, 0.18); }
     }
     pBody.rotation.x=THREE.MathUtils.lerp(pBody.rotation.x,swimming?-0.55:0,0.12);
     document.getElementById('swim-fx').style.display=swimming?'block':'none';
@@ -746,6 +843,7 @@ function animate(){
 
   for(var i=0;i<clouds.length;i++){clouds[i].position.x+=dt*(0.4+i*0.035);if(clouds[i].position.x>85)clouds[i].position.x=-85;}
   waterTex.offset.x+=dt*0.008; waterTex.offset.y+=dt*0.004;
+  oceanMesh.position.y = SEA_Y + Math.sin(Date.now()*0.001)*0.04;
 
   camera.position.copy(pPos);
   camera.rotation.order='YXZ';
