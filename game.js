@@ -285,15 +285,108 @@ var pRLeg  = mb(0.22,0.56,0.22,0x334488); pRLeg.position.set(0.13,0.28,0);
 var pLShoe = mb(0.24,0.1,0.27,0x221100);  pLShoe.position.set(-0.13,0.02,0.02);
 var pRShoe = mb(0.24,0.1,0.27,0x221100);  pRShoe.position.set(0.13,0.02,0.02);
 
-[pBody,pHead,pHair,pLArm,pRArm,pLLeg,pRLeg,pLShoe,pRShoe].forEach(function(m){m.castShadow=true;pg.add(m);});
-
-[-0.09,0.09].forEach(function(ox){
-  var eye=mb(0.06,0.06,0.02,0x111111); eye.position.set(ox,1.42,0.2); pg.add(eye);
+// Put player on layer 1 so main camera doesn't see it
+[pBody,pHead,pHair,pLArm,pRArm,pLLeg,pRLeg,pLShoe,pRShoe].forEach(function(m){
+  m.castShadow=true; m.layers.set(1); pg.add(m);
 });
+[-0.09,0.09].forEach(function(ox){
+  var eye=mb(0.06,0.06,0.02,0x111111); eye.position.set(ox,1.42,0.2);
+  eye.layers.set(1); pg.add(eye);
+});
+// Shadow camera sees layer 1
+sun.shadow.camera.layers.enable(1);
 
-var toolHolder=new THREE.Group(); toolHolder.position.set(0.1,-0.15,-0.2); pRArm.add(toolHolder);
-var toolMesh=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.52,0.07),new THREE.MeshLambertMaterial({color:0x888888}));
-toolMesh.visible=false; toolHolder.add(toolMesh);
+// ── Viewmodel (first-person hand + tool) ──────────────
+// Attached to camera, always rendered on layer 0
+var viewmodel = new THREE.Group();
+camera.add(viewmodel);
+scene.add(camera); // camera must be in scene for children to render
+
+// Hand (right arm stub visible in first person)
+var vmHand = mb(0.12, 0.35, 0.12, 0x3355cc);
+vmHand.position.set(0.28, -0.28, -0.45);
+vmHand.rotation.x = 0.2;
+viewmodel.add(vmHand);
+
+// Tool meshes for viewmodel
+function makeToolGeo(name) {
+  if (name === 'Кремень' || name === 'Камень') {
+    // flat stone shape
+    var g = new THREE.Group();
+    var stone = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.07, 0),
+      new THREE.MeshLambertMaterial({map: rockTex, color: 0xbbbbbb})
+    );
+    stone.position.set(0, 0.12, 0);
+    g.add(stone);
+    return g;
+  }
+  if (name === 'Кирка') {
+    var g = new THREE.Group();
+    // handle
+    var handle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.32, 0.04),
+      new THREE.MeshLambertMaterial({map: woodTex})
+    );
+    handle.position.y = 0.06;
+    g.add(handle);
+    // head
+    var head = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.05, 0.05),
+      new THREE.MeshLambertMaterial({map: rockTex})
+    );
+    head.position.y = 0.22;
+    g.add(head);
+    // pick tip
+    var tip = new THREE.Mesh(
+      new THREE.ConeGeometry(0.025, 0.1, 6),
+      new THREE.MeshLambertMaterial({map: rockTex})
+    );
+    tip.rotation.z = -Math.PI/2;
+    tip.position.set(0.14, 0.22, 0);
+    g.add(tip);
+    return g;
+  }
+  if (name === 'Топор') {
+    var g = new THREE.Group();
+    // handle
+    var handle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.32, 0.04),
+      new THREE.MeshLambertMaterial({map: woodTex})
+    );
+    handle.position.y = 0.06;
+    g.add(handle);
+    // blade
+    var blade = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.18, 0.04),
+      new THREE.MeshLambertMaterial({map: rockTex, color: 0xaaaaaa})
+    );
+    blade.position.set(0.07, 0.24, 0);
+    g.add(blade);
+    return g;
+  }
+  return null;
+}
+
+var vmTool = null; // current tool group on viewmodel
+
+function updateViewmodel() {
+  // remove old
+  if (vmTool) { viewmodel.remove(vmTool); vmTool = null; }
+  var h = slots[activeSlot];
+  if (!h || !h.tool) { vmHand.visible = false; return; }
+  vmHand.visible = true;
+  var g = makeToolGeo(h.name);
+  if (g) {
+    g.position.set(0.28, -0.18, -0.45);
+    g.rotation.set(0.3, 0.1, 0.1);
+    viewmodel.add(g);
+    vmTool = g;
+  }
+}
+
+// swing animation state for viewmodel
+var vmSwing = 0;
 
 // ===================================================
 // STATS
@@ -410,12 +503,7 @@ function renderSlot(el,item){
 function renderAll(){
   for(var i=0;i<36;i++){renderSlot(allEls[i],slots[i]);if(i>=27)renderSlot(mirrorEls[i],slots[i]);}
   for(var i=27;i<36;i++){if(allEls[i])allEls[i].classList.toggle('active',i===activeSlot);}
-  var h=slots[activeSlot];
-  if(h&&h.tool){
-    toolMesh.visible=true;
-    var r=null; for(var i=0;i<RECIPES.length;i++) if(RECIPES[i].name===h.name){r=RECIPES[i];break;}
-    toolMesh.material.color.set(r?r.color:0x888888);
-  } else { toolMesh.visible=false; }
+  updateViewmodel();
   renderCraft();
 }
 
@@ -624,7 +712,16 @@ function animate(){
       pLArm.rotation.x=THREE.MathUtils.lerp(pLArm.rotation.x,0,0.18);
       pRArm.rotation.x=THREE.MathUtils.lerp(pRArm.rotation.x,0,0.18);
     }
-    if(swingT>0){swingT=Math.max(0,swingT-dt*5);pRArm.rotation.x=-Math.sin(swingT*Math.PI)*1.5;}
+    if(swingT>0){
+      swingT=Math.max(0,swingT-dt*5);
+      pRArm.rotation.x=-Math.sin(swingT*Math.PI)*1.5;
+      // viewmodel swing
+      if(vmTool) vmTool.rotation.x = 0.3 + Math.sin(swingT*Math.PI)*1.2;
+      vmHand.rotation.x = 0.2 + Math.sin(swingT*Math.PI)*1.2;
+    } else {
+      if(vmTool) vmTool.rotation.x = THREE.MathUtils.lerp(vmTool.rotation.x||0.3, 0.3, 0.15);
+      vmHand.rotation.x = THREE.MathUtils.lerp(vmHand.rotation.x, 0.2, 0.15);
+    }
     pBody.rotation.x=THREE.MathUtils.lerp(pBody.rotation.x,swimming?-0.55:0,0.12);
     document.getElementById('swim-fx').style.display=swimming?'block':'none';
   }
