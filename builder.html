@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Builder</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #000; }
+  canvas { display: block; }
+  #ui {
+    position: fixed; top: 16px; left: 16px;
+    color: #fff; font-family: monospace; font-size: 13px;
+    background: rgba(0,0,0,0.55); padding: 12px 16px;
+    border-radius: 8px; min-width: 200px; user-select: none;
+  }
+  #ui div { margin-bottom: 6px; }
+  #ui button {
+    display: block; width: 100%; margin-top: 6px;
+    padding: 6px 10px; background: #333; color: #eee;
+    border: 1px solid #555; border-radius: 4px;
+    cursor: pointer; font-family: monospace; font-size: 12px;
+  }
+  #ui button:hover { background: #555; }
+  #hints {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    color: #ddd; font-family: monospace; font-size: 12px;
+    background: rgba(0,0,0,0.5); padding: 8px 16px; border-radius: 6px;
+    text-align: center; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div>Foundations: <span id="foundCount">0</span></div>
+  <div>Path cells: <span id="pathCount">0</span></div>
+  <button id="btnResetPaths">Reset Paths</button>
+  <button id="btnClearFoundations">Clear Foundations</button>
+</div>
+<div id="hints">WASD move &nbsp;|&nbsp; LMB place foundation &nbsp;|&nbsp; RMB remove &nbsp;|&nbsp; Scroll/drag orbit camera</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function() {
+'use strict';
+
+// ─── SCENE SETUP ────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 60, 120);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300);
+camera.position.set(0, 30, 50);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI / 2 - 0.05;
+controls.minDistance = 5;
+controls.maxDistance = 100;
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ─── LIGHTING ────────────────────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+scene.add(ambient);
+
+const hemi = new THREE.HemisphereLight(0x87ceeb, 0x4a7c2f, 0.5);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff5e0, 1.0);
+sun.position.set(40, 60, 30);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 200;
+sun.shadow.camera.left = -60;
+sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60;
+sun.shadow.camera.bottom = -60;
+sun.shadow.bias = -0.001;
+scene.add(sun);
+
+// ─── TERRAIN ─────────────────────────────────────────────────────────────────
+const TERRAIN_SIZE = 100;
+const TERRAIN_SEGS = 60;
+const terrainGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
+terrainGeo.rotateX(-Math.PI / 2);
+
+// Build zones (pre-flattened areas)
+const BUILD_ZONES = [
+  { x: -20, z: -15, r: 8 },
+  { x:  18, z: -18, r: 7 },
+  { x: -15, z:  18, r: 7 },
+  { x:  20, z:  20, r: 8 },
+];
+
+function terrainHeight(x, z) {
+  // Check if inside a build zone — flatten it
+  for (const bz of BUILD_ZONES) {
+    const d = Math.sqrt((x - bz.x) ** 2 + (z - bz.z) ** 2);
+    if (d < bz.r) {
+      const t = d / bz.r;
+      const flat = 0.3;
+      const full = noiseHeight(x, z);
+      return flat * t * t + full * (1 - t * t) * 0; // blend to flat
+    }
+  }
+  return noiseHeight(x, z);
+}
+
+function noiseHeight(x, z) {
+  return (
+    Math.sin(x * 0.15) * Math.cos(z * 0.12) * 2.5 +
+    Math.sin(x * 0.07 + 1.2) * Math.sin(z * 0.09 + 0.8) * 3.5 +
+    Math.cos(x * 0.25 + 0.5) * Math.sin(z * 0.22 + 1.1) * 1.2 +
+    Math.sin(x * 0.4 + z * 0.3) * 0.6 +
+    Math.cos(x * 0.05 + z * 0.06) * 4.0
+  );
+}
+
+// Apply heights + vertex colors
+const posAttr = terrainGeo.attributes.position;
+const colors = [];
+for (let i = 0; i < posAttr.count; i++) {
+  const x = posAttr.getX(i);
+  const z = posAttr.getZ(i);
+  const y = terrainHeight(x, z);
+  posAttr.setY(i, y);
+
+  // Grass color variation
+  const t = (y + 5) / 12;
+  const r = 0.25 + t * 0.15 + (Math.random() * 0.06 - 0.03);
+  const g = 0.45 + t * 0.2  + (Math.random() * 0.08 - 0.04);
+  const b = 0.15 + t * 0.05 + (Math.random() * 0.04 - 0.02);
+  colors.push(r, g, b);
+}
+terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+terrainGeo.computeVertexNormals();
+
+const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+terrain.receiveShadow = true;
+terrain.name = 'terrain';
+scene.add(terrain);
+
+// Build zone markers (faint circles)
+BUILD_ZONES.forEach(bz => {
+  const pts = [];
+  for (let i = 0; i <= 64; i++) {
+    const a = (i / 64) * Math.PI * 2;
+    const cx = bz.x + Math.cos(a) * bz.r;
+    const cz = bz.z + Math.sin(a) * bz.r;
+    const cy = terrainHeight(cx, cz) + 0.05;
+    pts.push(new THREE.Vector3(cx, cy, cz));
+  }
+  const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25 });
+  scene.add(new THREE.Line(lineGeo, lineMat));
+});
+
+// ─── TREES & ROCKS ───────────────────────────────────────────────────────────
+function placeOnTerrain(x, z) {
+  return terrainHeight(x, z);
+}
+
+// 15 trees
+for (let i = 0; i < 15; i++) {
+  const x = (Math.random() - 0.5) * 80;
+  const z = (Math.random() - 0.5) * 80;
+  const y = placeOnTerrain(x, z);
+
+  const trunkH = 1.5 + Math.random() * 1.5;
+  const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, trunkH, 7);
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b4226 });
+  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+  trunk.position.set(x, y + trunkH / 2, z);
+  trunk.castShadow = true;
+  scene.add(trunk);
+
+  const coneH = 3 + Math.random() * 2;
+  const coneGeo = new THREE.ConeGeometry(1.2 + Math.random() * 0.5, coneH, 7);
+  const coneMat = new THREE.MeshLambertMaterial({ color: 0x2d6a2d });
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.position.set(x, y + trunkH + coneH / 2 - 0.3, z);
+  cone.castShadow = true;
+  scene.add(cone);
+}
+
+// 10 rocks
+for (let i = 0; i < 10; i++) {
+  const x = (Math.random() - 0.5) * 80;
+  const z = (Math.random() - 0.5) * 80;
+  const y = placeOnTerrain(x, z);
+  const s = 0.4 + Math.random() * 0.8;
+  const rockGeo = new THREE.DodecahedronGeometry(s, 0);
+  const rockMat = new THREE.MeshLambertMaterial({ color: 0x888880 });
+  const rock = new THREE.Mesh(rockGeo, rockMat);
+  rock.position.set(x, y + s * 0.5, z);
+  rock.rotation.set(Math.random(), Math.random(), Math.random());
+  rock.castShadow = true;
+  scene.add(rock);
+}
+
+// ─── PROCEDURAL TEXTURES ─────────────────────────────────────────────────────
+function makeWoodTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#c8a060';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 18; i++) {
+    const y = (i / 18) * 128;
+    ctx.strokeStyle = `rgba(80,40,10,${0.15 + Math.random() * 0.2})`;
+    ctx.lineWidth = 1 + Math.random() * 2;
+    ctx.beginPath();
+    ctx.moveTo(0, y + Math.random() * 4 - 2);
+    for (let x = 0; x <= 128; x += 8) {
+      ctx.lineTo(x, y + Math.sin(x * 0.3) * 2 + Math.random() * 2 - 1);
+    }
+    ctx.stroke();
+  }
+  // knot
+  ctx.fillStyle = 'rgba(100,55,15,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(64, 64, 10, 7, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+
+const woodTexture = makeWoodTexture();
+
+// ─── GRID SNAP ───────────────────────────────────────────────────────────────
+function snapGrid(v) { return Math.round(v / 2) * 2; }
+
+// ─── FOUNDATIONS ─────────────────────────────────────────────────────────────
+const foundations = new Map(); // key "x,z" -> mesh
+const foundMat = new THREE.MeshLambertMaterial({ map: woodTexture });
+
+function foundKey(x, z) { return `${x},${z}`; }
+
+function getFoundationY(x, z) {
+  // Average of 4 corners
+  const h = [
+    terrainHeight(x - 1, z - 1),
+    terrainHeight(x + 1, z - 1),
+    terrainHeight(x - 1, z + 1),
+    terrainHeight(x + 1, z + 1),
+  ];
+  return (h[0] + h[1] + h[2] + h[3]) / 4;
+}
+
+function placeFoundation(x, z) {
+  const key = foundKey(x, z);
+  if (foundations.has(key)) return false;
+  const geo = new THREE.BoxGeometry(2, 0.3, 2);
+  const mesh = new THREE.Mesh(geo, foundMat);
+  const fy = getFoundationY(x, z);
+  mesh.position.set(x, fy + 0.15, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  foundations.set(key, mesh);
+  updateUI();
+  return true;
+}
+
+function removeFoundation(x, z) {
+  const key = foundKey(x, z);
+  if (!foundations.has(key)) return;
+  scene.remove(foundations.get(key));
+  foundations.delete(key);
+  updateUI();
+}
+
+// Ghost preview
+const ghostGeo = new THREE.BoxGeometry(2, 0.3, 2);
+const ghostMatValid = new THREE.MeshLambertMaterial({ color: 0x00ff44, transparent: true, opacity: 0.5 });
+const ghostMatInvalid = new THREE.MeshLambertMaterial({ color: 0xff2222, transparent: true, opacity: 0.5 });
+const ghost = new THREE.Mesh(ghostGeo, ghostMatValid);
+ghost.visible = false;
+scene.add(ghost);
+
+// ─── PLAYER ──────────────────────────────────────────────────────────────────
+const playerGeo = new THREE.SphereGeometry(0.4, 12, 8);
+const playerMat = new THREE.MeshLambertMaterial({ color: 0xff6600 });
+const player = new THREE.Mesh(playerGeo, playerMat);
+player.castShadow = true;
+scene.add(player);
+
+// Start player in first build zone
+player.position.set(BUILD_ZONES[0].x, terrainHeight(BUILD_ZONES[0].x, BUILD_ZONES[0].z) + 0.5, BUILD_ZONES[0].z);
+
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; });
+window.addEventListener('keyup',   e => { keys[e.code] = false; });
+
+// ─── DESIRE PATHS ────────────────────────────────────────────────────────────
+const PATH_CELL = 0.5;
+const PATH_THRESHOLD = 0.4;
+const weightMap = new Map();
+let pathMesh = null;
+let pathRebuildTimer = 0;
+
+function cellKey(x, z) {
+  const cx = Math.round(x / PATH_CELL);
+  const cz = Math.round(z / PATH_CELL);
+  return `${cx},${cz}`;
+}
+
+function cellCoords(key) {
+  const [cx, cz] = key.split(',').map(Number);
+  return { x: cx * PATH_CELL, z: cz * PATH_CELL };
+}
+
+function recordStep(x, z) {
+  const k = cellKey(x, z);
+  weightMap.set(k, Math.min(1.0, (weightMap.get(k) || 0) + 0.015));
+}
+
+function rebuildPaths() {
+  if (pathMesh) { scene.remove(pathMesh); pathMesh = null; }
+
+  const highCells = [];
+  weightMap.forEach((w, k) => {
+    if (w >= PATH_THRESHOLD) {
+      const { x, z } = cellCoords(k);
+      highCells.push({ x, z, w });
+    }
+  });
+
+  if (highCells.length < 2) { updateUI(); return; }
+
+  // Build ribbon segments from connected chains
+  const vertices = [];
+  const indices = [];
+  const WIDTH = 0.4; // half-width
+
+  // For each high cell, check neighbors and draw a quad toward them
+  const highSet = new Set(highCells.map(c => cellKey(c.x, c.z)));
+
+  const dirs = [
+    { dx: PATH_CELL, dz: 0 },
+    { dx: 0, dz: PATH_CELL },
+    { dx: PATH_CELL, dz: PATH_CELL },
+    { dx: PATH_CELL, dz: -PATH_CELL },
+  ];
+
+  highCells.forEach(({ x, z }) => {
+    dirs.forEach(({ dx, dz }) => {
+      const nx = x + dx, nz = z + dz;
+      if (!highSet.has(cellKey(nx, nz))) return;
+
+      // Segment from (x,z) to (nx,nz)
+      const midX = (x + nx) / 2, midZ = (z + nz) / 2;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      const perpX = -dz / len, perpZ = dx / len;
+
+      const y0 = terrainHeight(x, z) + 0.03;
+      const y1 = terrainHeight(nx, nz) + 0.03;
+      const ym = terrainHeight(midX, midZ) + 0.03;
+
+      // Slight curve via midpoint
+      const base = vertices.length / 3;
+
+      vertices.push(
+        x  + perpX * WIDTH, y0, z  + perpZ * WIDTH,
+        x  - perpX * WIDTH, y0, z  - perpZ * WIDTH,
+        midX + perpX * WIDTH, ym, midZ + perpZ * WIDTH,
+        midX - perpX * WIDTH, ym, midZ - perpZ * WIDTH,
+        nx + perpX * WIDTH, y1, nz + perpZ * WIDTH,
+        nx - perpX * WIDTH, y1, nz - perpZ * WIDTH,
+      );
+
+      indices.push(
+        base+0, base+1, base+2,  base+1, base+3, base+2,
+        base+2, base+3, base+4,  base+3, base+5, base+4,
+      );
+    });
+  });
+
+  if (vertices.length === 0) { updateUI(); return; }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshLambertMaterial({ color: 0x6b4c1e, side: THREE.DoubleSide });
+  pathMesh = new THREE.Mesh(geo, mat);
+  pathMesh.receiveShadow = true;
+  scene.add(pathMesh);
+  updateUI();
+}
+
+// ─── RAYCASTER ───────────────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let lastMousePos = new THREE.Vector2();
+
+renderer.domElement.addEventListener('mousemove', e => {
+  mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  lastMousePos.set(e.clientX, e.clientY);
+});
+
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+
+renderer.domElement.addEventListener('mousedown', e => {
+  if (e.button === 2) {
+    // RMB remove
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObject(terrain);
+    if (hits.length) {
+      const p = hits[0].point;
+      removeFoundation(snapGrid(p.x), snapGrid(p.z));
+    }
+  }
+});
+
+renderer.domElement.addEventListener('click', e => {
+  if (e.button !== 0) return;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObject(terrain);
+  if (hits.length) {
+    const p = hits[0].point;
+    placeFoundation(snapGrid(p.x), snapGrid(p.z));
+  }
+});
+
+// ─── UI ──────────────────────────────────────────────────────────────────────
+function updateUI() {
+  document.getElementById('foundCount').textContent = foundations.size;
+  let pathCells = 0;
+  weightMap.forEach(w => { if (w >= PATH_THRESHOLD) pathCells++; });
+  document.getElementById('pathCount').textContent = pathCells;
+}
+
+document.getElementById('btnResetPaths').addEventListener('click', () => {
+  weightMap.clear();
+  if (pathMesh) { scene.remove(pathMesh); pathMesh = null; }
+  updateUI();
+});
+
+document.getElementById('btnClearFoundations').addEventListener('click', () => {
+  foundations.forEach(m => scene.remove(m));
+  foundations.clear();
+  updateUI();
+});
+
+// ─── ANIMATION LOOP ──────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+const PLAYER_SPEED = 8;
+
+function updatePlayer(dt) {
+  // Camera-relative movement
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0;
+  forward.normalize();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+  const move = new THREE.Vector3();
+  if (keys['KeyW'] || keys['ArrowUp'])    move.addScaledVector(forward,  1);
+  if (keys['KeyS'] || keys['ArrowDown'])  move.addScaledVector(forward, -1);
+  if (keys['KeyA'] || keys['ArrowLeft'])  move.addScaledVector(right,   -1);
+  if (keys['KeyD'] || keys['ArrowRight']) move.addScaledVector(right,    1);
+
+  if (move.lengthSq() > 0) {
+    move.normalize().multiplyScalar(PLAYER_SPEED * dt);
+    player.position.x += move.x;
+    player.position.z += move.z;
+
+    // Clamp to terrain bounds
+    player.position.x = Math.max(-49, Math.min(49, player.position.x));
+    player.position.z = Math.max(-49, Math.min(49, player.position.z));
+
+    // Snap to terrain
+    player.position.y = terrainHeight(player.position.x, player.position.z) + 0.5;
+
+    // Record path
+    recordStep(player.position.x, player.position.z);
+
+    // Orbit target follows player
+    controls.target.lerp(player.position, 0.08);
+  }
+}
+
+function updateGhost() {
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObject(terrain);
+  if (hits.length) {
+    const p = hits[0].point;
+    const sx = snapGrid(p.x), sz = snapGrid(p.z);
+    const key = foundKey(sx, sz);
+    const valid = !foundations.has(key);
+    ghost.material = valid ? ghostMatValid : ghostMatInvalid;
+    const fy = getFoundationY(sx, sz);
+    ghost.position.set(sx, fy + 0.15, sz);
+    ghost.visible = true;
+  } else {
+    ghost.visible = false;
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  updatePlayer(dt);
+  updateGhost();
+
+  pathRebuildTimer += dt;
+  if (pathRebuildTimer >= 3.0) {
+    pathRebuildTimer = 0;
+    rebuildPaths();
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+})();
+</script>
+</body>
+</html>
