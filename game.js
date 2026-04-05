@@ -1,347 +1,642 @@
-// ═══════════════════════════════════════════════════════
-//  SCENE & RENDERER
-// ═══════════════════════════════════════════════════════
-const scene = new THREE.Scene();
+// ===================================================
+// INIT
+// ===================================================
+var scene    = new THREE.Scene();
+var camera   = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500);
+var renderer = new THREE.WebGLRenderer({ antialias:true });
+
 scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.Fog(0x87CEEB, 40, 120);
+scene.fog = new THREE.Fog(0x87CEEB, 50, 150);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 200);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
-window.addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+window.addEventListener('resize', function() {
+  camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// ═══════════════════════════════════════════════════════
-//  LIGHTING
-// ═══════════════════════════════════════════════════════
-const sun = new THREE.DirectionalLight(0xfff5e0, 1.4);
+// ===================================================
+// LIGHTING
+// ===================================================
+var sun = new THREE.DirectionalLight(0xffffff, 1.2);
 sun.position.set(60, 100, 40);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { near:1, far:250, left:-80, right:80, top:80, bottom:-80 });
+sun.shadow.camera.left = sun.shadow.camera.bottom = -80;
+sun.shadow.camera.right = sun.shadow.camera.top = 80;
+sun.shadow.camera.far = 250;
+sun.shadow.mapSize.set(1024, 1024);
 scene.add(sun);
-scene.add(new THREE.AmbientLight(0x99bbff, 0.55));
-const hemi = new THREE.HemisphereLight(0x87CEEB, 0x3a7a1a, 0.4);
-scene.add(hemi);
+scene.add(new THREE.AmbientLight(0xaaccff, 0.6));
+scene.add(new THREE.HemisphereLight(0x87CEEB, 0x3d8b2a, 0.4));
 
-// ═══════════════════════════════════════════════════════
-//  PROCEDURAL TEXTURES
-// ═══════════════════════════════════════════════════════
-function makeCanvasTex(size, draw) {
-  const c = document.createElement('canvas');
+// ===================================================
+// TEXTURES (canvas-based)
+// ===================================================
+function makeTex(size, drawFn, rx, ry) {
+  var c = document.createElement('canvas');
   c.width = c.height = size;
-  draw(c.getContext('2d'), size);
-  const t = new THREE.CanvasTexture(c);
+  drawFn(c.getContext('2d'), size);
+  var t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(rx||1, ry||rx||1);
   return t;
 }
 
-const grassTex = makeCanvasTex(128, (ctx, s) => {
-  ctx.fillStyle = '#4a9e3a'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<800;i++) {
-    const x=Math.random()*s, y=Math.random()*s;
-    ctx.fillStyle = `hsl(${110+Math.random()*20},${50+Math.random()*20}%,${28+Math.random()*14}%)`;
-    ctx.fillRect(x,y,2+Math.random()*3,2+Math.random()*3);
+var grassTex = makeTex(128, function(ctx, s) {
+  ctx.fillStyle='#4a9e3a'; ctx.fillRect(0,0,s,s);
+  for(var i=0;i<1000;i++){
+    ctx.fillStyle='hsl('+(108+Math.random()*20)+','+(48+Math.random()*20)+'%,'+(24+Math.random()*14)+'%)';
+    ctx.fillRect(Math.random()*s,Math.random()*s,2,2);
   }
-});
-grassTex.repeat.set(20,20);
+}, 20, 20);
 
-const dirtTex = makeCanvasTex(64, (ctx, s) => {
-  ctx.fillStyle = '#7a5230'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<400;i++) {
-    ctx.fillStyle = `hsl(25,${35+Math.random()*20}%,${22+Math.random()*18}%)`;
-    ctx.fillRect(Math.random()*s, Math.random()*s, 2+Math.random()*4, 2+Math.random()*4);
+var rockTex = makeTex(64, function(ctx, s) {
+  ctx.fillStyle='#6e6e6e'; ctx.fillRect(0,0,s,s);
+  for(var i=0;i<400;i++){
+    ctx.fillStyle='hsl(0,0%,'+(35+Math.random()*28)+'%)';
+    ctx.fillRect(Math.random()*s,Math.random()*s,2,2);
   }
-});
+}, 2, 2);
 
-const rockTex = makeCanvasTex(64, (ctx, s) => {
-  ctx.fillStyle = '#7a7a7a'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<500;i++) {
-    ctx.fillStyle = `hsl(0,0%,${38+Math.random()*28}%)`;
-    ctx.fillRect(Math.random()*s, Math.random()*s, 1+Math.random()*4, 1+Math.random()*4);
+var woodTex = makeTex(64, function(ctx, s) {
+  ctx.fillStyle='#7a4010'; ctx.fillRect(0,0,s,s);
+  for(var i=0;i<10;i++){
+    ctx.strokeStyle='hsl(22,'+(38+Math.random()*16)+'%,'+(16+Math.random()*12)+'%)';
+    ctx.lineWidth=2; ctx.beginPath();
+    ctx.moveTo(0,i*(s/10)); ctx.lineTo(s,i*(s/10)+Math.random()*6-3); ctx.stroke();
   }
-});
+}, 2, 3);
 
-const woodTex = makeCanvasTex(64, (ctx, s) => {
-  ctx.fillStyle = '#7a4010'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<12;i++) {
-    ctx.strokeStyle = `hsl(25,${40+Math.random()*20}%,${18+Math.random()*14}%)`;
-    ctx.lineWidth = 1+Math.random()*2;
-    ctx.beginPath(); ctx.moveTo(0, i*(s/12)); ctx.lineTo(s, i*(s/12)+Math.random()*6-3);
-    ctx.stroke();
+var leafTex = makeTex(64, function(ctx, s) {
+  ctx.fillStyle='#2a7a1a'; ctx.fillRect(0,0,s,s);
+  for(var i=0;i<300;i++){
+    ctx.fillStyle='hsl('+(108+Math.random()*22)+','+(44+Math.random()*20)+'%,'+(18+Math.random()*16)+'%)';
+    ctx.beginPath(); ctx.arc(Math.random()*s,Math.random()*s,1+Math.random()*2,0,Math.PI*2); ctx.fill();
   }
-});
+}, 2, 2);
 
-const leafTex = makeCanvasTex(64, (ctx, s) => {
-  ctx.fillStyle = '#2a7a1a'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<300;i++) {
-    ctx.fillStyle = `hsl(${105+Math.random()*25},${45+Math.random()*25}%,${20+Math.random()*18}%)`;
-    ctx.beginPath();
-    ctx.arc(Math.random()*s, Math.random()*s, 1+Math.random()*3, 0, Math.PI*2);
-    ctx.fill();
+var waterTex = makeTex(128, function(ctx, s) {
+  ctx.fillStyle='#1a6fa8'; ctx.fillRect(0,0,s,s);
+  for(var i=0;i<200;i++){
+    ctx.strokeStyle='rgba(255,255,255,'+(0.04+Math.random()*0.1)+')';
+    ctx.lineWidth=1; ctx.beginPath();
+    var y=Math.random()*s, x=Math.random()*s;
+    ctx.moveTo(x,y); ctx.lineTo(x+15+Math.random()*20,y+Math.random()*3-1); ctx.stroke();
   }
-});
+}, 4, 4);
 
-const waterTex = makeCanvasTex(128, (ctx, s) => {
-  ctx.fillStyle = '#1a6fa8'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<200;i++) {
-    ctx.strokeStyle = `rgba(255,255,255,${0.05+Math.random()*0.12})`;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    const y = Math.random()*s;
-    ctx.moveTo(Math.random()*s, y);
-    ctx.lineTo(Math.random()*s, y+Math.random()*4);
-    ctx.stroke();
+var sandTex = makeTex(64, function(ctx, s) {
+  ctx.fillStyle='#c8a84b'; ctx.fillRect(0,0,s,s);
+  for(var i=0;i<300;i++){
+    ctx.fillStyle='hsl(42,'+(38+Math.random()*18)+'%,'+(50+Math.random()*14)+'%)';
+    ctx.fillRect(Math.random()*s,Math.random()*s,2,2);
   }
-});
-waterTex.repeat.set(4,4);
+}, 3, 3);
 
-const sandTex = makeCanvasTex(64, (ctx, s) => {
-  ctx.fillStyle = '#c8a84b'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<400;i++) {
-    ctx.fillStyle = `hsl(42,${40+Math.random()*20}%,${52+Math.random()*16}%)`;
-    ctx.fillRect(Math.random()*s, Math.random()*s, 1+Math.random()*3, 1+Math.random()*3);
-  }
-});
-sandTex.repeat.set(3,3);
-
-const bushTex = makeCanvasTex(32, (ctx, s) => {
-  ctx.fillStyle = '#1e6b1e'; ctx.fillRect(0,0,s,s);
-  for (let i=0;i<120;i++) {
-    ctx.fillStyle = `hsl(${115+Math.random()*20},${50+Math.random()*20}%,${18+Math.random()*14}%)`;
+var bushTex = makeTex(32, function(ctx, s) {
+  ctx.fillStyle='#1e6b1e'; ctx.fillRect(0,0,s,s);
+  for(var i=0;i<120;i++){
+    ctx.fillStyle='hsl('+(112+Math.random()*18)+','+(48+Math.random()*18)+'%,'+(16+Math.random()*12)+'%)';
     ctx.beginPath(); ctx.arc(Math.random()*s,Math.random()*s,1+Math.random()*2,0,Math.PI*2); ctx.fill();
   }
 });
 
-// ═══════════════════════════════════════════════════════
-//  TERRAIN (heightmap-based)
-// ═══════════════════════════════════════════════════════
-const TERRAIN_SIZE = 200;
-const TERRAIN_SEGS = 80;
-const groundGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
-groundGeo.rotateX(-Math.PI / 2);
-
-// Simple noise via layered sin/cos
-function terrainHeight(x, z) {
-  let h = 0;
-  h += Math.sin(x * 0.04) * Math.cos(z * 0.04) * 3.5;
-  h += Math.sin(x * 0.09 + 1.2) * Math.cos(z * 0.07 + 0.8) * 1.8;
-  h += Math.sin(x * 0.18 + 2.1) * Math.cos(z * 0.15 + 1.5) * 0.8;
-  h += Math.sin(x * 0.35) * Math.cos(z * 0.32) * 0.35;
-  // flatten spawn area
-  const d = Math.hypot(x, z);
-  if (d < 12) h *= (d / 12) * (d / 12);
+// ===================================================
+// TERRAIN
+// ===================================================
+function terrainY(x, z) {
+  var h = 0;
+  h += Math.sin(x*0.035)*Math.cos(z*0.035)*4;
+  h += Math.sin(x*0.08+1.3)*Math.cos(z*0.07+0.9)*2;
+  h += Math.sin(x*0.17+2.2)*Math.cos(z*0.14+1.6)*0.9;
+  h += Math.sin(x*0.34)*Math.cos(z*0.31)*0.3;
+  var d = Math.sqrt(x*x+z*z);
+  if(d<14) h *= (d/14)*(d/14);
   return h;
 }
 
-const tPos = groundGeo.attributes.position;
-for (let i = 0; i < tPos.count; i++) {
-  const x = tPos.getX(i), z = tPos.getZ(i);
-  tPos.setY(i, terrainHeight(x, z));
-}
-groundGeo.computeVertexNormals();
-
-const groundMat = new THREE.MeshLambertMaterial({ map: grassTex });
-const ground = new THREE.Mesh(groundGeo, groundMat);
+var tGeo = new THREE.PlaneGeometry(200,200,80,80);
+tGeo.rotateX(-Math.PI/2);
+var tp = tGeo.attributes.position;
+for(var i=0;i<tp.count;i++) tp.setY(i, terrainY(tp.getX(i), tp.getZ(i)));
+tGeo.computeVertexNormals();
+var ground = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({map:grassTex}));
 ground.receiveShadow = true;
 scene.add(ground);
 
-function getGroundY(x, z) {
-  // sample terrain height analytically
-  return terrainHeight(x, z);
-}
-
-// ═══════════════════════════════════════════════════════
-//  LAKES
-// ═══════════════════════════════════════════════════════
-const lakes = []; // { x, z, r, waterY }
-const LAKE_CONFIGS = [
-  { x: 25,  z: 30,  r: 12 },
-  { x: -40, z: -20, r: 9  },
-  { x: 50,  z: -45, r: 11 },
-  { x: -30, z: 50,  r: 8  },
-];
-
-LAKE_CONFIGS.forEach(cfg => {
-  const waterY = getGroundY(cfg.x, cfg.z) - 0.5;
-
-  // Sand shore ring
-  const shoreGeo = new THREE.CylinderGeometry(cfg.r + 2.5, cfg.r + 2.5, 0.15, 32);
-  const shore = new THREE.Mesh(shoreGeo, new THREE.MeshLambertMaterial({ map: sandTex }));
-  shore.position.set(cfg.x, waterY + 0.05, cfg.z);
-  shore.receiveShadow = true;
+// ===================================================
+// LAKES
+// ===================================================
+var lakes = [];
+var lakeDefs = [{x:28,z:32,r:13},{x:-42,z:-22,r:10},{x:52,z:-48,r:12},{x:-28,z:52,r:9}];
+lakeDefs.forEach(function(def) {
+  var wy = terrainY(def.x, def.z) - 0.5;
+  var shore = new THREE.Mesh(
+    new THREE.CylinderGeometry(def.r+3,def.r+3,0.2,32),
+    new THREE.MeshLambertMaterial({map:sandTex})
+  );
+  shore.position.set(def.x, wy+0.05, def.z);
   scene.add(shore);
-
-  // Water disc
-  const waterGeo = new THREE.CylinderGeometry(cfg.r, cfg.r, 0.18, 32);
-  const waterMat = new THREE.MeshLambertMaterial({
-    map: waterTex, transparent: true, opacity: 0.82, color: 0x2288cc
-  });
-  const water = new THREE.Mesh(waterGeo, waterMat);
-  water.position.set(cfg.x, waterY + 0.12, cfg.z);
+  var water = new THREE.Mesh(
+    new THREE.CylinderGeometry(def.r,def.r,0.2,32),
+    new THREE.MeshLambertMaterial({map:waterTex,transparent:true,opacity:0.85,color:0x2288cc})
+  );
+  water.position.set(def.x, wy+0.12, def.z);
   scene.add(water);
-
-  // Depress terrain inside lake (visual only — we handle swim by distance)
-  lakes.push({ x: cfg.x, z: cfg.z, r: cfg.r, waterY: waterY + 0.12 });
+  lakes.push({x:def.x, z:def.z, r:def.r, wy:wy+0.12});
 });
 
-function inLake(x, z) {
-  for (const l of lakes) if (Math.hypot(x - l.x, z - l.z) < l.r) return l;
+function getLake(x,z) {
+  for(var i=0;i<lakes.length;i++) {
+    var l=lakes[i];
+    if(Math.sqrt((x-l.x)*(x-l.x)+(z-l.z)*(z-l.z))<l.r) return l;
+  }
   return null;
 }
 
-// ═══════════════════════════════════════════════════════
-//  COLLIDERS & INTERACTABLES
-// ═══════════════════════════════════════════════════════
-const colliders     = []; // { x, z, r }
-const interactables = []; // { ..., type, hp, onMine }
+// ===================================================
+// WORLD OBJECTS
+// ===================================================
+var colliders     = [];
+var interactables = [];
 
-// ═══════════════════════════════════════════════════════
-//  TREES
-// ═══════════════════════════════════════════════════════
-function makeTree(x, z) {
-  const gy = getGroundY(x, z);
-  const group = new THREE.Group();
+function removeObj(obj) {
+  if(obj.group) scene.remove(obj.group);
+  if(obj.mesh)  scene.remove(obj.mesh);
+  var i=interactables.indexOf(obj); if(i>-1) interactables.splice(i,1);
+  i=colliders.indexOf(obj);         if(i>-1) colliders.splice(i,1);
+}
 
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.32, 2.2, 8),
-    new THREE.MeshLambertMaterial({ map: woodTex })
-  );
-  trunk.position.y = 1.1; trunk.castShadow = true; group.add(trunk);
-
-  const lMat = new THREE.MeshLambertMaterial({ map: leafTex });
-  [[1.6, 3.2, 3.6], [1.25, 2.6, 5.0]].forEach(([r, h, py]) => {
-    const f = new THREE.Mesh(new THREE.ConeGeometry(r, h, 8), lMat);
-    f.position.y = py; f.castShadow = true; group.add(f);
+function spawnTree(x,z) {
+  var gy=terrainY(x,z);
+  var g=new THREE.Group();
+  var trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.32,2.2,8),new THREE.MeshLambertMaterial({map:woodTex}));
+  trunk.position.y=1.1; trunk.castShadow=true; g.add(trunk);
+  var lm=new THREE.MeshLambertMaterial({map:leafTex});
+  [[1.6,3.2,3.6],[1.25,2.6,5.0]].forEach(function(v){
+    var f=new THREE.Mesh(new THREE.ConeGeometry(v[0],v[1],8),lm);
+    f.position.y=v[2]; f.castShadow=true; g.add(f);
   });
-
-  group.position.set(x, gy, z);
-  scene.add(group);
-
-  const obj = { group, x, z, r: 0.55, type: 'tree', hp: 5, maxHp: 5,
-    onMine: () => addItem({ name: 'Дерево', icon: '🪵', count: 1 })
-  };
+  g.position.set(x,gy,z); scene.add(g);
+  var obj={group:g,x:x,z:z,r:0.55,type:'tree',hp:5,onHit:function(){addItem({name:'Дерево',icon:'🪵',count:1});}};
   colliders.push(obj); interactables.push(obj);
 }
 
-// ═══════════════════════════════════════════════════════
-//  ROCKS (world objects)
-// ═══════════════════════════════════════════════════════
-function makeRock(x, z) {
-  const gy = getGroundY(x, z);
-  const size = 0.5 + Math.random() * 0.5;
-  const mesh = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(size, 1),
-    new THREE.MeshLambertMaterial({ map: rockTex })
-  );
-  mesh.position.set(x, gy + size * 0.5, z);
-  mesh.rotation.set(Math.random()*2, Math.random()*6, Math.random()*2);
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  scene.add(mesh);
-
-  const obj = { mesh, x, z, r: size + 0.2, type: 'rock', hp: 4, maxHp: 4,
-    onMine: () => addItem({ name: 'Камень', icon: '🪨', count: 1 })
-  };
+function spawnRock(x,z) {
+  var gy=terrainY(x,z);
+  var sz=0.5+Math.random()*0.5;
+  var mesh=new THREE.Mesh(new THREE.DodecahedronGeometry(sz,1),new THREE.MeshLambertMaterial({map:rockTex}));
+  mesh.position.set(x,gy+sz*0.5,z);
+  mesh.rotation.set(Math.random()*2,Math.random()*6,Math.random()*2);
+  mesh.castShadow=true; mesh.receiveShadow=true; scene.add(mesh);
+  var obj={mesh:mesh,x:x,z:z,r:sz+0.2,type:'rock',hp:4,onHit:function(){addItem({name:'Камень',icon:'🪨',count:1});}};
   colliders.push(obj); interactables.push(obj);
 }
 
-// ═══════════════════════════════════════════════════════
-//  BUSHES
-// ═══════════════════════════════════════════════════════
-function makeBush(x, z) {
-  const gy = getGroundY(x, z);
-  const group = new THREE.Group();
-  const bMat = new THREE.MeshLambertMaterial({ map: bushTex });
-  [[0,0,0,0.72],[0.55,0.1,0,0.55],[-0.55,0.05,0,0.55],[0,0.1,0.55,0.5],[0,0.05,-0.5,0.5]].forEach(([ox,oy,oz,s]) => {
-    const b = new THREE.Mesh(new THREE.SphereGeometry(s, 7, 7), bMat);
-    b.position.set(ox, oy + 0.5, oz); group.add(b);
+function spawnBush(x,z) {
+  var gy=terrainY(x,z);
+  var g=new THREE.Group();
+  var bm=new THREE.MeshLambertMaterial({map:bushTex});
+  [[0,0,0,.7],[.5,.1,0,.55],[-.5,.05,0,.55],[0,.1,.5,.5],[0,.05,-.5,.5]].forEach(function(v){
+    var b=new THREE.Mesh(new THREE.SphereGeometry(v[3],7,7),bm);
+    b.position.set(v[0],v[1]+0.5,v[2]); g.add(b);
   });
-  const berryMat = new THREE.MeshLambertMaterial({ color: 0xdd1111 });
-  for (let i = 0; i < 7; i++) {
-    const a = (i/7)*Math.PI*2;
-    const berry = new THREE.Mesh(new THREE.SphereGeometry(0.1, 5, 5), berryMat);
-    berry.position.set(Math.cos(a)*0.62, 0.5+Math.random()*0.35, Math.sin(a)*0.62);
-    group.add(berry);
+  var bm2=new THREE.MeshLambertMaterial({color:0xdd1111});
+  for(var i=0;i<8;i++){
+    var a=(i/8)*Math.PI*2;
+    var berry=new THREE.Mesh(new THREE.SphereGeometry(0.09,5,5),bm2);
+    berry.position.set(Math.cos(a)*0.6,0.5+Math.random()*0.3,Math.sin(a)*0.6);
+    g.add(berry);
   }
-  group.position.set(x, gy, z);
-  scene.add(group);
-
-  const obj = { group, x, z, r: 0.85, type: 'bush', hp: 1, maxHp: 1,
-    onMine: () => { addFood(25); addWater(10); showHint('🍓 +25 еды, +10 воды'); }
-  };
+  g.position.set(x,gy,z); scene.add(g);
+  var obj={group:g,x:x,z:z,r:0.85,type:'bush',hp:1,onHit:function(){addFood(28);addWater(12);showHint('🍓 +28 еды  +12 воды');}};
   colliders.push(obj); interactables.push(obj);
 }
 
-// ═══════════════════════════════════════════════════════
-//  STONE ITEM IN WORLD (pickable)
-// ═══════════════════════════════════════════════════════
-const worldStones = [];
-function spawnWorldStone(x, z) {
-  const gy = getGroundY(x, z);
-  const mesh = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(0.22, 0),
-    new THREE.MeshLambertMaterial({ map: rockTex, color: 0xaaaaaa })
-  );
-  mesh.position.set(x, gy + 0.25, z);
-  mesh.castShadow = true;
-  scene.add(mesh);
-  const obj = { mesh, x, z, r: 0.6, type: 'stone_item' };
-  interactables.push(obj);
-  worldStones.push(obj);
-  return obj;
+var pickups=[];
+function spawnStone(x,z) {
+  var gy=terrainY(x,z);
+  var mesh=new THREE.Mesh(new THREE.DodecahedronGeometry(0.18,0),new THREE.MeshLambertMaterial({map:rockTex,color:0xbbbbbb}));
+  mesh.position.set(x,gy+0.22,z); mesh.castShadow=true; scene.add(mesh);
+  var obj={mesh:mesh,x:x,z:z,r:0.6,type:'pickup'};
+  interactables.push(obj); pickups.push(obj);
 }
 
-// ═══════════════════════════════════════════════════════
-//  CLOUDS
-// ═══════════════════════════════════════════════════════
-function makeCloud(x, y, z) {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  [[1.6,0,0,0],[1.3,1.3,0.3,0],[1.1,-1.3,0.2,0],[1.4,0.5,0.5,0.9]].forEach(([s,ox,oy,oz]) => {
-    const c = new THREE.Mesh(new THREE.SphereGeometry(s,7,7), mat);
-    c.position.set(ox,oy,oz); g.add(c);
+function spawnCloud(x,y,z) {
+  var g=new THREE.Group();
+  var m=new THREE.MeshLambertMaterial({color:0xffffff});
+  [[1.6,0,0,0],[1.3,1.4,.3,0],[1.1,-1.4,.2,0],[1.4,.5,.5,.9]].forEach(function(v){
+    var c=new THREE.Mesh(new THREE.SphereGeometry(v[0],7,7),m);
+    c.position.set(v[1],v[2],v[3]); g.add(c);
   });
   g.position.set(x,y,z); scene.add(g); return g;
 }
 
-// ═══════════════════════════════════════════════════════
-//  POPULATE WORLD
-// ═══════════════════════════════════════════════════════
-function awayFromLakes(x, z, minD) {
-  for (const l of lakes) if (Math.hypot(x-l.x, z-l.z) < l.r + minD) return false;
+function awayFromLakes(x,z,pad) {
+  for(var i=0;i<lakes.length;i++) {
+    var l=lakes[i];
+    if(Math.sqrt((x-l.x)*(x-l.x)+(z-l.z)*(z-l.z))<l.r+pad) return false;
+  }
   return true;
 }
 
-for (let i = 0; i < 65; i++) {
-  let x, z, tries = 0;
-  do { x=(Math.random()-0.5)*160; z=(Math.random()-0.5)*160; tries++; }
-  while ((Math.hypot(x,z)<6 || !awayFromLakes(x,z,3)) && tries<30);
-  makeTree(x, z);
+// populate
+for(var i=0;i<70;i++){
+  var x,z,t=0;
+  do{x=(Math.random()-.5)*160;z=(Math.random()-.5)*160;t++;}
+  while((Math.sqrt(x*x+z*z)<7||!awayFromLakes(x,z,3))&&t<40);
+  spawnTree(x,z);
 }
-for (let i = 0; i < 35; i++) {
-  let x, z, tries=0;
-  do { x=(Math.random()-0.5)*160; z=(Math.random()-0.5)*160; tries++; }
-  while ((Math.hypot(x,z)<4 || !awayFromLakes(x,z,2)) && tries<30);
-  makeRock(x, z);
+for(var i=0;i<40;i++){
+  var x,z,t=0;
+  do{x=(Math.random()-.5)*160;z=(Math.random()-.5)*160;t++;}
+  while((Math.sqrt(x*x+z*z)<5||!awayFromLakes(x,z,2))&&t<40);
+  spawnRock(x,z);
 }
-for (let i = 0; i < 28; i++) {
-  let x, z, tries=0;
-  do { x=(Math.random()-0.5)*150; z=(Math.random()-0.5)*150; tries++; }
-  while ((Math.hypot(x,z)<4 || !awayFromLakes(x,z,2)) && tries<30);
-  makeBush(x, z);
+for(var i=0;i<30;i++){
+  var x,z,t=0;
+  do{x=(Math.random()-.5)*150;z=(Math.random()-.5)*150;t++;}
+  while((Math.sqrt(x*x+z*z)<4||!awayFromLakes(x,z,2))&&t<40);
+  spawnBush(x,z);
+}
+[[-3,4],[4,-3],[6,2],[-5,-4],[2,7],[-7,2],[5,5]].forEach(function(p){spawnStone(p[0],p[1]);});
+
+var clouds=[];
+for(var i=0;i<18;i++) clouds.push(spawnCloud((Math.random()-.5)*160,16+Math.random()*10,(Math.random()-.5)*160));
+
+// ===================================================
+// PLAYER MESH
+// ===================================================
+var pg = new THREE.Group();
+scene.add(pg);
+
+function mb(w,h,d,col){ return new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color:col})); }
+
+var pBody  = mb(0.5,0.62,0.28,0x3355cc); pBody.position.y=0.91;
+var pHead  = mb(0.38,0.38,0.38,0xffcc99); pHead.position.y=1.40;
+var pHair  = mb(0.41,0.11,0.41,0x553311); pHair.position.y=1.63;
+var pLArm  = mb(0.18,0.56,0.18,0x3355cc); pLArm.position.set(-0.34,0.89,0);
+var pRArm  = mb(0.18,0.56,0.18,0x3355cc); pRArm.position.set(0.34,0.89,0);
+var pLLeg  = mb(0.22,0.56,0.22,0x334488); pLLeg.position.set(-0.13,0.28,0);
+var pRLeg  = mb(0.22,0.56,0.22,0x334488); pRLeg.position.set(0.13,0.28,0);
+var pLShoe = mb(0.24,0.1,0.27,0x221100);  pLShoe.position.set(-0.13,0.02,0.02);
+var pRShoe = mb(0.24,0.1,0.27,0x221100);  pRShoe.position.set(0.13,0.02,0.02);
+
+[pBody,pHead,pHair,pLArm,pRArm,pLLeg,pRLeg,pLShoe,pRShoe].forEach(function(m){m.castShadow=true;pg.add(m);});
+
+[-0.09,0.09].forEach(function(ox){
+  var eye=mb(0.06,0.06,0.02,0x111111); eye.position.set(ox,1.42,0.2); pg.add(eye);
+});
+
+var toolHolder=new THREE.Group(); toolHolder.position.set(0.1,-0.15,-0.2); pRArm.add(toolHolder);
+var toolMesh=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.52,0.07),new THREE.MeshLambertMaterial({color:0x888888}));
+toolMesh.visible=false; toolHolder.add(toolMesh);
+
+// ===================================================
+// STATS
+// ===================================================
+var S={hp:100,food:100,water:100,stamina:100};
+var DRAIN=100/(20*60);
+
+function setBar(id,v){ document.getElementById(id).style.width=Math.max(0,Math.min(100,v))+'%'; }
+function syncBars(){ setBar('hp-bar',S.hp); setBar('food-bar',S.food); setBar('water-bar',S.water); setBar('stam-bar',S.stamina); }
+function addFood(v){  S.food  =Math.min(100,S.food +v); syncBars(); }
+function addWater(v){ S.water =Math.min(100,S.water+v); syncBars(); }
+
+// ===================================================
+// INVENTORY
+// ===================================================
+var slots=new Array(36).fill(null);
+slots[27]={name:'Кремень',icon:'🪨',count:1,tool:true};
+
+function addItem(item){
+  if(!item.tool){
+    for(var i=0;i<36;i++){
+      if(slots[i]&&slots[i].name===item.name){slots[i].count+=item.count;renderAll();showHint('+'+item.count+' '+item.icon+' '+item.name);return;}
+    }
+  }
+  for(var i=0;i<36;i++){
+    if(!slots[i]){slots[i]={name:item.name,icon:item.icon,count:item.count,tool:!!item.tool};renderAll();showHint('+'+item.count+' '+item.icon+' '+item.name);return;}
+  }
+  showHint('Инвентарь полон!');
 }
 
-// Spawn a few world stones near start
-[[-3,4],[4,-3],[6,2],[-5,-4],[2,7]].forEach(([x,z]) => spawnWorldStone(x,z));
+function countItem(name){ var n=0; for(var i=0;i<36;i++) if(slots[i]&&slots[i].name===name) n+=slots[i].count; return n; }
+function consumeItem(name,n){
+  var left=n;
+  for(var i=0;i<36&&left>0;i++){
+    if(slots[i]&&slots[i].name===name){var t=Math.min(slots[i].count,left);slots[i].count-=t;left-=t;if(slots[i].count<=0)slots[i]=null;}
+  }
+}
 
-const clouds = [];
-for (let i=0;i<16;i++)
-  clouds.push(makeCloud((Math.random()-0.5)*150, 16+Math.random()*10, (Math.random()-0.5)*150));
+var RECIPES=[
+  {name:'Кирка',icon:'⛏️',tool:true,count:1,color:0x999999,needs:[{name:'Камень',count:2},{name:'Дерево',count:2}]},
+  {name:'Топор',icon:'🪓',tool:true,count:1,color:0x8B4513,needs:[{name:'Камень',count:1},{name:'Дерево',count:3}]},
+];
+
+function tryCraft(r){
+  for(var i=0;i<r.needs.length;i++){if(countItem(r.needs[i].name)<r.needs[i].count){showHint('Нужно: '+r.needs[i].count+'× '+r.needs[i].name);return;}}
+  r.needs.forEach(function(n){consumeItem(n.name,n.count);});
+  addItem({name:r.name,icon:r.icon,tool:true,count:1});
+  renderAll(); renderCraft();
+}
+
+function toolDmg(type){
+  var h=slots[activeSlot]; if(!h) return 0;
+  if(type==='tree'){ if(h.name==='Топор') return 2; if(h.name==='Кремень'||h.name==='Камень') return 1; }
+  if(type==='rock'){ if(h.name==='Кирка') return 2; if(h.name==='Кремень'||h.name==='Камень') return 1; }
+  if(type==='bush'||type==='pickup') return 1;
+  return 0;
+}
+
+// ===================================================
+// UI
+// ===================================================
+var activeSlot=27, invOpen=false, dragFrom=null;
+var allEls=[], mirrorEls=[];
+
+function buildSlot(idx,num){
+  var el=document.createElement('div');
+  el.className='slot';
+  el.innerHTML=(num!==undefined?'<span class="slot-num">'+num+'</span>':'')+
+    '<span class="slot-icon"></span><span class="slot-cnt"></span>';
+  if(idx>=27) el.addEventListener('click',function(){if(!invOpen)setActive(idx);});
+  el.addEventListener('mousedown',function(e){
+    if(!invOpen||e.button!==0||!slots[idx]) return;
+    dragFrom=idx;
+    var g=document.getElementById('drag-ghost');
+    g.textContent=slots[idx].icon; g.style.display='block';
+    e.preventDefault();
+  });
+  el.addEventListener('mouseenter',function(){if(dragFrom!==null)el.classList.add('hover');});
+  el.addEventListener('mouseleave',function(){el.classList.remove('hover');});
+  el.addEventListener('mouseup',function(){
+    if(dragFrom!==null&&dragFrom!==idx){var tmp=slots[idx];slots[idx]=slots[dragFrom];slots[dragFrom]=tmp;renderAll();}
+    el.classList.remove('hover'); endDrag();
+  });
+  return el;
+}
+
+var hotbarEl=document.getElementById('hotbar');
+for(var i=27;i<36;i++){var el=buildSlot(i,i-26);allEls[i]=el;hotbarEl.appendChild(el);}
+
+var invGrid=document.getElementById('inv-grid');
+for(var i=0;i<27;i++){var el=buildSlot(i);allEls[i]=el;invGrid.appendChild(el);}
+
+var invHbar=document.getElementById('inv-hotbar');
+for(var i=27;i<36;i++){var el=buildSlot(i,i-26);mirrorEls[i]=el;invHbar.appendChild(el);}
+
+document.addEventListener('mouseup',endDrag);
+document.addEventListener('mousemove',function(e){
+  if(dragFrom!==null){var g=document.getElementById('drag-ghost');g.style.left=e.clientX+'px';g.style.top=e.clientY+'px';}
+});
+
+function endDrag(){
+  dragFrom=null;
+  document.getElementById('drag-ghost').style.display='none';
+  document.querySelectorAll('.hover').forEach(function(el){el.classList.remove('hover');});
+}
+
+function renderSlot(el,item){
+  if(!el) return;
+  el.querySelector('.slot-icon').textContent=item?item.icon:'';
+  el.querySelector('.slot-cnt').textContent=(item&&item.count>1)?item.count:'';
+  el.title=item?item.name+' ×'+item.count:'';
+}
+
+function renderAll(){
+  for(var i=0;i<36;i++){renderSlot(allEls[i],slots[i]);if(i>=27)renderSlot(mirrorEls[i],slots[i]);}
+  for(var i=27;i<36;i++){if(allEls[i])allEls[i].classList.toggle('active',i===activeSlot);}
+  var h=slots[activeSlot];
+  if(h&&h.tool){
+    toolMesh.visible=true;
+    var r=null; for(var i=0;i<RECIPES.length;i++) if(RECIPES[i].name===h.name){r=RECIPES[i];break;}
+    toolMesh.material.color.set(r?r.color:0x888888);
+  } else { toolMesh.visible=false; }
+  renderCraft();
+}
+
+function setActive(i){activeSlot=i;renderAll();}
+
+function renderCraft(){
+  var cl=document.getElementById('craft-list'); if(!cl) return;
+  cl.innerHTML='';
+  RECIPES.forEach(function(r){
+    var ok=r.needs.every(function(n){return countItem(n.name)>=n.count;});
+    var d=document.createElement('div'); d.className='recipe'+(ok?' can':'');
+    d.innerHTML='<span style="font-size:22px">'+r.icon+'</span>'+
+      '<span class="recipe-name">'+r.name+'<br><span class="recipe-req">'+
+      r.needs.map(function(n){return n.count+'× '+n.name;}).join(', ')+'</span></span>'+
+      '<button class="craft-btn"'+(ok?'':' disabled')+'>Крафт</button>';
+    d.querySelector('.craft-btn').addEventListener('click',function(){tryCraft(r);});
+    cl.appendChild(d);
+  });
+}
+
+function toggleInv(){
+  invOpen=!invOpen;
+  document.getElementById('inv-bg').style.display=invOpen?'flex':'none';
+  if(invOpen){renderCraft();document.exitPointerLock();}
+  else renderer.domElement.requestPointerLock();
+}
+
+renderAll();
+
+// ===================================================
+// HINT
+// ===================================================
+var hintTimer=null;
+function showHint(msg){
+  var el=document.getElementById('hint');
+  el.textContent=msg; el.style.opacity='1';
+  clearTimeout(hintTimer);
+  hintTimer=setTimeout(function(){el.style.opacity='0';},2400);
+}
+
+// ===================================================
+// INPUT
+// ===================================================
+var keys={};
+document.addEventListener('keydown',function(e){
+  keys[e.code]=true;
+  if(e.code.startsWith('Digit')){var n=parseInt(e.key);if(n>=1&&n<=9)setActive(26+n);}
+  if(e.code==='KeyE') toggleInv();
+  if(e.code==='KeyF'&&!invOpen) tryDrink();
+  if(e.code==='Space'&&!invOpen){e.preventDefault();tryJump();}
+});
+document.addEventListener('keyup',function(e){keys[e.code]=false;});
+
+var yaw=0,pitch=0;
+renderer.domElement.addEventListener('click',function(){if(!invOpen)renderer.domElement.requestPointerLock();});
+document.addEventListener('mousemove',function(e){
+  if(document.pointerLockElement!==renderer.domElement) return;
+  yaw-=e.movementX*0.002; pitch-=e.movementY*0.002;
+  pitch=Math.max(-1.1,Math.min(1.1,pitch));
+});
+document.addEventListener('mousedown',function(e){
+  if(e.button!==0||invOpen) return;
+  if(document.pointerLockElement!==renderer.domElement) return;
+  tryAction();
+});
+
+// ===================================================
+// PHYSICS
+// ===================================================
+var PLAYER_R=0.42, EYE_H=1.72, WALK=4.5, RUN=8.5, JUMP=6.8, GRAV=20;
+var pPos=new THREE.Vector3(0,EYE_H,0);
+var velY=0, onGround=false, swimming=false, swimLake=null;
+
+function tryJump(){
+  if(onGround&&!swimming){velY=JUMP;onGround=false;}
+  else if(swimming){velY=3.5;}
+}
+function tryDrink(){
+  var l=getLake(pPos.x,pPos.z);
+  if(l){addWater(40);showHint('💧 +40 воды');}
+  else showHint('Подойди к озеру и нажми F');
+}
+function resolveCol(pos){
+  for(var i=0;i<colliders.length;i++){
+    var c=colliders[i];
+    var dx=pos.x-c.x,dz=pos.z-c.z;
+    var d=Math.sqrt(dx*dx+dz*dz),min=PLAYER_R+c.r;
+    if(d<min&&d>0.001){var p=(min-d)/d;pos.x+=dx*p;pos.z+=dz*p;}
+  }
+  pos.x=Math.max(-97,Math.min(97,pos.x));
+  pos.z=Math.max(-97,Math.min(97,pos.z));
+}
+
+// ===================================================
+// INTERACTION
+// ===================================================
+var REACH=4.5, cooldown=0, swingT=0;
+
+function getAimed(){
+  var dir=new THREE.Vector3(-Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
+  var best=null,bestDot=0.42;
+  for(var i=0;i<interactables.length;i++){
+    var obj=interactables[i];
+    var dx=obj.x-pPos.x,dz=obj.z-pPos.z;
+    var dist=Math.sqrt(dx*dx+dz*dz);
+    if(dist>REACH||dist<0.01) continue;
+    var dot=(dx/dist)*dir.x+(dz/dist)*dir.z;
+    if(dot>bestDot){bestDot=dot;best=obj;}
+  }
+  return best;
+}
+
+function tryAction(){
+  if(cooldown>0) return;
+  var obj=getAimed(); if(!obj) return;
+
+  if(obj.type==='pickup'){
+    addItem({name:'Камень',icon:'🪨',count:1});
+    scene.remove(obj.mesh);
+    var i=interactables.indexOf(obj);if(i>-1)interactables.splice(i,1);
+    i=pickups.indexOf(obj);if(i>-1)pickups.splice(i,1);
+    cooldown=0.25; return;
+  }
+  if(obj.type==='bush'){
+    obj.onHit();
+    var bx=obj.x,bz=obj.z; removeObj(obj);
+    setTimeout(function(){spawnBush(bx,bz);},12000);
+    cooldown=0.5; swingT=1; return;
+  }
+  var dmg=toolDmg(obj.type);
+  if(dmg===0){
+    showHint(obj.type==='tree'?'🪓 Нужен Кремень или Топор':'⛏️ Нужен Кремень или Кирка');
+    return;
+  }
+  obj.hp-=dmg; cooldown=0.38; swingT=1;
+  var meshes=obj.group?obj.group.children:[obj.mesh];
+  meshes.forEach(function(m){if(m.material&&m.material.emissive)m.material.emissive.setRGB(0.5,0.25,0);});
+  setTimeout(function(){meshes.forEach(function(m){if(m.material&&m.material.emissive)m.material.emissive.setRGB(0,0,0);});},130);
+  if(obj.hp<=0){
+    obj.onHit();
+    var bx=obj.x,bz=obj.z,bt=obj.type; removeObj(obj);
+    setTimeout(function(){if(bt==='tree')spawnTree(bx,bz);else spawnRock(bx,bz);},bt==='tree'?22000:16000);
+  }
+}
+
+var hintTick=0;
+function updateHint(){
+  var obj=getAimed(); if(!obj) return;
+  var map={tree:'🪵 ЛКМ — рубить (Кремень/Топор)',rock:'🪨 ЛКМ — добыть (Кремень/Кирка)',bush:'🍓 ЛКМ — съесть ягоды',pickup:'🪨 ЛКМ — подобрать камень'};
+  if(map[obj.type]) showHint(map[obj.type]);
+}
+
+// ===================================================
+// GAME LOOP
+// ===================================================
+var clock=new THREE.Clock(), walkT=0;
+
+function animate(){
+  requestAnimationFrame(animate);
+  var dt=Math.min(clock.getDelta(),0.05);
+  if(cooldown>0) cooldown-=dt;
+
+  if(!invOpen){
+    var sprint=(keys['ShiftLeft']||keys['ShiftRight'])&&S.stamina>0;
+    var spd=sprint?RUN:WALK;
+    if(sprint) S.stamina=Math.max(0,S.stamina-dt*20);
+    else       S.stamina=Math.min(100,S.stamina+dt*12);
+
+    var fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+    var rgt=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+    var mv=new THREE.Vector3();
+    if(keys['KeyW']||keys['ArrowUp'])    mv.add(fwd);
+    if(keys['KeyS']||keys['ArrowDown'])  mv.sub(fwd);
+    if(keys['KeyA']||keys['ArrowLeft'])  mv.sub(rgt);
+    if(keys['KeyD']||keys['ArrowRight']) mv.add(rgt);
+    var moving=mv.lengthSq()>0;
+    if(moving){mv.normalize().multiplyScalar(spd*dt);pPos.x+=mv.x;pPos.z+=mv.z;resolveCol(pPos);walkT+=dt*(sprint?2.4:1.5);}
+
+    swimLake=getLake(pPos.x,pPos.z); swimming=!!swimLake;
+    if(swimming){
+      var ty=swimLake.wy+0.9; pPos.y+=(ty-pPos.y)*9*dt; velY=0; onGround=false;
+    } else {
+      velY-=GRAV*dt; pPos.y+=velY*dt;
+      var floor=terrainY(pPos.x,pPos.z)+EYE_H;
+      if(pPos.y<=floor){pPos.y=floor;velY=0;onGround=true;}else onGround=false;
+    }
+
+    S.food =Math.max(0,S.food -DRAIN*dt);
+    S.water=Math.max(0,S.water-DRAIN*dt*1.25);
+    if(S.food<=0||S.water<=0) S.hp=Math.max(0,S.hp-dt*0.7);
+    syncBars();
+
+    hintTick-=dt; if(hintTick<=0){updateHint();hintTick=0.22;}
+
+    pg.position.set(pPos.x,pPos.y-EYE_H,pPos.z);
+    pg.rotation.y=yaw+Math.PI;
+
+    if(moving&&onGround){
+      pLLeg.rotation.x= Math.sin(walkT*3.6)*0.6;
+      pRLeg.rotation.x=-Math.sin(walkT*3.6)*0.6;
+      pLArm.rotation.x=-Math.sin(walkT*3.6)*0.5;
+      pRArm.rotation.x= Math.sin(walkT*3.6)*0.5;
+    } else {
+      pLLeg.rotation.x=THREE.MathUtils.lerp(pLLeg.rotation.x,0,0.18);
+      pRLeg.rotation.x=THREE.MathUtils.lerp(pRLeg.rotation.x,0,0.18);
+      pLArm.rotation.x=THREE.MathUtils.lerp(pLArm.rotation.x,0,0.18);
+      pRArm.rotation.x=THREE.MathUtils.lerp(pRArm.rotation.x,0,0.18);
+    }
+    if(swingT>0){swingT=Math.max(0,swingT-dt*5);pRArm.rotation.x=-Math.sin(swingT*Math.PI)*1.5;}
+    pBody.rotation.x=THREE.MathUtils.lerp(pBody.rotation.x,swimming?-0.55:0,0.12);
+    document.getElementById('swim-fx').style.display=swimming?'block':'none';
+  }
+
+  for(var i=0;i<clouds.length;i++){clouds[i].position.x+=dt*(0.4+i*0.035);if(clouds[i].position.x>85)clouds[i].position.x=-85;}
+  waterTex.offset.x+=dt*0.008; waterTex.offset.y+=dt*0.004;
+
+  camera.position.copy(pPos);
+  camera.rotation.order='YXZ';
+  camera.rotation.y=yaw;
+  camera.rotation.x=pitch;
+  renderer.render(scene,camera);
+}
+
+animate();

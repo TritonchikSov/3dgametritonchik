@@ -5,127 +5,130 @@
 <title>Выживание 3D</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { overflow:hidden; background:#000; font-family:'Segoe UI',sans-serif; }
+body { overflow:hidden; font-family:Arial,sans-serif; }
 canvas { display:block; }
 
 #crosshair {
   position:fixed; top:50%; left:50%;
   transform:translate(-50%,-50%);
   pointer-events:none; z-index:10;
-  width:18px; height:18px;
 }
-#crosshair::before,#crosshair::after {
-  content:''; position:absolute;
-  background:rgba(255,255,255,0.9);
-  border-radius:1px;
+#crosshair::before, #crosshair::after {
+  content:''; position:absolute; background:rgba(255,255,255,.9);
 }
-#crosshair::before { width:2px; height:100%; left:50%; transform:translateX(-50%); }
-#crosshair::after  { width:100%; height:2px; top:50%; transform:translateY(-50%); }
+#crosshair::before { width:2px; height:20px; left:50%; transform:translateX(-50%); }
+#crosshair::after  { width:20px; height:2px; top:50%; transform:translateY(-50%); }
 
-#stats {
+#hud {
   position:fixed; top:12px; left:12px; z-index:10;
   display:flex; flex-direction:column; gap:5px;
 }
-.srow { display:flex; align-items:center; gap:7px; }
-.sico { font-size:14px; width:20px; text-align:center; }
-.sbar { width:140px; height:11px; background:rgba(0,0,0,0.5); border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); }
-.sfill { height:100%; border-radius:6px; transition:width 0.25s; }
-#b-hp    { background:linear-gradient(90deg,#c0392b,#e74c3c); }
-#b-food  { background:linear-gradient(90deg,#b7470a,#e67e22); }
-#b-water { background:linear-gradient(90deg,#1565a8,#3498db); }
-#b-stam  { background:linear-gradient(90deg,#1a8a1a,#27ae60); }
+.bar-row { display:flex; align-items:center; gap:8px; }
+.bar-label { font-size:16px; width:22px; }
+.bar-bg {
+  width:150px; height:12px;
+  background:rgba(0,0,0,.5); border-radius:6px; overflow:hidden;
+  border:1px solid rgba(255,255,255,.2);
+}
+.bar-fill { height:100%; border-radius:6px; transition:width .3s; }
+#hp-bar    { background:linear-gradient(90deg,#c0392b,#e74c3c); }
+#food-bar  { background:linear-gradient(90deg,#b7470a,#e67e22); }
+#water-bar { background:linear-gradient(90deg,#1565a8,#3498db); }
+#stam-bar  { background:linear-gradient(90deg,#1a8a1a,#27ae60); }
 
 #hotbar {
   position:fixed; bottom:12px; left:50%; transform:translateX(-50%);
   display:flex; gap:4px; z-index:10;
 }
 .slot {
-  width:54px; height:54px;
-  background:rgba(10,10,10,0.78);
-  border:2px solid rgba(255,255,255,0.22);
-  border-radius:7px;
+  width:56px; height:56px;
+  background:rgba(0,0,0,.7);
+  border:2px solid rgba(255,255,255,.25);
+  border-radius:8px;
   display:flex; align-items:center; justify-content:center;
   position:relative; cursor:pointer; user-select:none;
-  transition:border-color .1s, box-shadow .1s;
 }
-.slot:hover { border-color:rgba(255,255,255,0.5); }
-.slot.active { border-color:#ffe066; box-shadow:0 0 10px rgba(255,220,80,.6); }
-.slot.dragover { border-color:#4fc3f7; }
-.snum { position:absolute; top:2px; left:5px; font-size:10px; color:rgba(255,255,255,.4); }
-.sicon { font-size:24px; line-height:1; }
-.scnt { position:absolute; bottom:2px; right:4px; font-size:11px; color:#fff; font-weight:700; text-shadow:0 1px 2px #000; }
+.slot.active { border-color:#ffe066; box-shadow:0 0 8px rgba(255,220,80,.7); }
+.slot.hover  { border-color:rgba(255,255,255,.6); }
+.slot-num  { position:absolute; top:2px; left:5px; font-size:10px; color:rgba(255,255,255,.4); }
+.slot-icon { font-size:26px; }
+.slot-cnt  { position:absolute; bottom:2px; right:4px; font-size:11px; color:#fff; font-weight:700; text-shadow:0 1px 2px #000; }
 
 #hint {
-  position:fixed; top:36%; left:50%; transform:translateX(-50%);
-  background:rgba(0,0,0,.65); color:#fff; font-size:14px; font-weight:600;
-  padding:6px 16px; border-radius:9px; pointer-events:none;
-  opacity:0; transition:opacity .2s; z-index:20; text-shadow:0 1px 3px #000;
-  white-space:nowrap;
+  position:fixed; top:35%; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,.7); color:#fff; font-size:14px; font-weight:600;
+  padding:7px 18px; border-radius:10px; pointer-events:none;
+  opacity:0; transition:opacity .2s; z-index:20; white-space:nowrap;
 }
 
-#inv-overlay {
-  position:fixed; inset:0; background:rgba(0,0,0,.72);
+#inv-bg {
+  position:fixed; inset:0; background:rgba(0,0,0,.75);
   display:none; align-items:center; justify-content:center; z-index:100;
 }
 #inv-wrap { display:flex; gap:14px; align-items:flex-start; }
-#inv-box, #craft-box {
-  background:rgba(16,16,16,.97);
-  border:2px solid rgba(255,255,255,.13);
-  border-radius:13px; padding:22px;
+.panel {
+  background:rgba(15,15,15,.97);
+  border:2px solid rgba(255,255,255,.15);
+  border-radius:12px; padding:22px;
 }
-.boxtitle { color:#ffe066; font-size:17px; font-weight:700; text-align:center; margin-bottom:12px; }
-#inv-grid { display:grid; grid-template-columns:repeat(9,54px); gap:4px; margin-bottom:6px; }
-#inv-hbar { display:grid; grid-template-columns:repeat(9,54px); gap:4px; border-top:1px solid rgba(255,255,255,.1); padding-top:6px; }
-#inv-tip  { color:rgba(255,255,255,.28); font-size:11px; text-align:center; margin-top:8px; }
+.panel-title { color:#ffe066; font-size:17px; font-weight:700; text-align:center; margin-bottom:12px; }
+#inv-grid { display:grid; grid-template-columns:repeat(9,56px); gap:4px; margin-bottom:6px; }
+#inv-hotbar { display:grid; grid-template-columns:repeat(9,56px); gap:4px;
+  border-top:1px solid rgba(255,255,255,.1); padding-top:6px; }
+#inv-tip { color:rgba(255,255,255,.3); font-size:11px; text-align:center; margin-top:8px; }
 
-#craft-box { min-width:210px; }
-.crecipe {
-  display:flex; align-items:center; gap:9px;
-  padding:7px 8px; border-radius:7px; margin-bottom:5px;
+#craft-panel { min-width:220px; }
+.recipe {
+  display:flex; align-items:center; gap:8px;
+  padding:7px; border-radius:7px; margin-bottom:5px;
   background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07);
 }
-.crecipe.ok { border-color:rgba(255,220,80,.4); background:rgba(255,220,80,.06); }
-.cname { flex:1; color:#ddd; font-size:13px; }
-.creq  { color:#888; font-size:11px; }
-.cbtn  { padding:4px 9px; border-radius:5px; border:none; cursor:pointer; background:#ffe066; color:#111; font-weight:700; font-size:12px; }
-.cbtn:disabled { background:#444; color:#666; cursor:not-allowed; }
+.recipe.can { border-color:rgba(255,220,80,.4); background:rgba(255,220,80,.05); }
+.recipe-name { flex:1; color:#ddd; font-size:13px; }
+.recipe-req  { color:#888; font-size:11px; }
+.craft-btn {
+  padding:4px 10px; border-radius:5px; border:none; cursor:pointer;
+  background:#ffe066; color:#111; font-weight:700; font-size:12px;
+}
+.craft-btn:disabled { background:#444; color:#666; cursor:not-allowed; }
 
-#ghost { position:fixed; pointer-events:none; font-size:30px; z-index:200; transform:translate(-50%,-50%); display:none; }
-#swim-vfx { position:fixed; inset:0; pointer-events:none; background:rgba(15,80,160,.2); display:none; z-index:5; }
-#ctrlhint { position:fixed; bottom:76px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.5); font-size:11px; pointer-events:none; z-index:10; text-shadow:0 1px 2px #000; }
+#drag-ghost { position:fixed; pointer-events:none; font-size:30px; z-index:200; transform:translate(-50%,-50%); display:none; }
+#swim-fx { position:fixed; inset:0; pointer-events:none; background:rgba(10,70,150,.22); display:none; z-index:5; }
+#controls { position:fixed; bottom:78px; left:50%; transform:translateX(-50%);
+  color:rgba(255,255,255,.5); font-size:11px; pointer-events:none; z-index:10; }
 </style>
 </head>
 <body>
 <div id="crosshair"></div>
 <div id="hint"></div>
-<div id="swim-vfx"></div>
+<div id="swim-fx"></div>
 
-<div id="stats">
-  <div class="srow"><span class="sico">❤️</span><div class="sbar"><div class="sfill" id="b-hp"    style="width:100%"></div></div></div>
-  <div class="srow"><span class="sico">🍖</span><div class="sbar"><div class="sfill" id="b-food"  style="width:100%"></div></div></div>
-  <div class="srow"><span class="sico">💧</span><div class="sbar"><div class="sfill" id="b-water" style="width:100%"></div></div></div>
-  <div class="srow"><span class="sico">⚡</span><div class="sbar"><div class="sfill" id="b-stam"  style="width:100%"></div></div></div>
+<div id="hud">
+  <div class="bar-row"><span class="bar-label">❤️</span><div class="bar-bg"><div class="bar-fill" id="hp-bar"    style="width:100%"></div></div></div>
+  <div class="bar-row"><span class="bar-label">🍖</span><div class="bar-bg"><div class="bar-fill" id="food-bar"  style="width:100%"></div></div></div>
+  <div class="bar-row"><span class="bar-label">💧</span><div class="bar-bg"><div class="bar-fill" id="water-bar" style="width:100%"></div></div></div>
+  <div class="bar-row"><span class="bar-label">⚡</span><div class="bar-bg"><div class="bar-fill" id="stam-bar"  style="width:100%"></div></div></div>
 </div>
 
 <div id="hotbar"></div>
 
-<div id="inv-overlay">
+<div id="inv-bg">
   <div id="inv-wrap">
-    <div id="inv-box">
-      <div class="boxtitle">🎒 Инвентарь</div>
+    <div class="panel">
+      <div class="panel-title">🎒 Инвентарь</div>
       <div id="inv-grid"></div>
-      <div id="inv-hbar"></div>
-      <div id="inv-tip">E — закрыть · перетаскивай предметы</div>
+      <div id="inv-hotbar"></div>
+      <div id="inv-tip">E — закрыть · перетаскивай предметы мышью</div>
     </div>
-    <div id="craft-box">
-      <div class="boxtitle">⚒ Крафт</div>
+    <div class="panel" id="craft-panel">
+      <div class="panel-title">⚒ Крафт</div>
       <div id="craft-list"></div>
     </div>
   </div>
 </div>
 
-<div id="ghost"></div>
-<div id="ctrlhint">WASD — ход · Shift — бег · Пробел — прыжок · F — пить · E — инвентарь · ЛКМ — действие</div>
+<div id="drag-ghost"></div>
+<div id="controls">WASD — движение · Shift — бег · Пробел — прыжок · F — пить · E — инвентарь · ЛКМ — действие</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="game.js"></script>
