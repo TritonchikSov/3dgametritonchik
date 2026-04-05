@@ -284,6 +284,11 @@ for(var fi=0;fi<80;fi++){
   var petal=new THREE.Mesh(new THREE.SphereGeometry(0.1,5,4),new THREE.MeshLambertMaterial({color:col}));
   petal.position.set(fx,fgy+0.26,fz);
   scene.add(petal);
+  // register as decorative so building system can clear them
+  if(typeof decoratives!=='undefined'){
+    decoratives.push({mesh:stem,x:fx,z:fz});
+    decoratives.push({mesh:petal,x:fx,z:fz});
+  }
 }
 
 // ── Blueprint item given at start — see slots[28] init in INVENTORY section
@@ -585,6 +590,7 @@ var RECIPES=[
   {name:'Кирка',icon:'⛏️',tool:true,count:1,color:0x999999,needs:[{name:'Камень',count:2},{name:'Дерево',count:2}]},
   {name:'Топор',icon:'🪓',tool:true,count:1,color:0x8B4513,needs:[{name:'Камень',count:1},{name:'Дерево',count:3}]},
   {name:'Пол',icon:'🟫',count:4,build:true,needs:[{name:'Дерево',count:2}]},
+  {name:'Фундамент',icon:'🧱',count:1,needs:[{name:'Камень',count:4},{name:'Дерево',count:2}]},
 ];
 
 // ── Build system ────────────────────────────────────
@@ -763,6 +769,7 @@ document.addEventListener('mousedown',function(e){
   if(e.button===2){ // right click — place build block
     var h=slots[activeSlot];
     if(h&&h.build) placeBuildBlock();
+    if(typeof tryPlaceFoundation==='function') tryPlaceFoundation();
     return;
   }
   if(e.button!==0) return;
@@ -872,6 +879,7 @@ function animate(){
   var dt=Math.min(clock.getDelta(),0.05);
   if(!gameStarted){ renderer.render(scene,camera); return; }
   if(cooldown>0) cooldown-=dt;
+  var moving=false; // declared here so updateBuilding can read it
 
   if(!invOpen){
     var sprint=(keys['ShiftLeft']||keys['ShiftRight'])&&S.stamina>0;
@@ -886,7 +894,7 @@ function animate(){
     if(keys['KeyS']||keys['ArrowDown'])  mv.sub(fwd);
     if(keys['KeyA']||keys['ArrowLeft'])  mv.sub(rgt);
     if(keys['KeyD']||keys['ArrowRight']) mv.add(rgt);
-    var moving=mv.lengthSq()>0;
+    var moving=mv.lengthSq()>0; // reassign outer var
     if(moving){mv.normalize().multiplyScalar(spd*dt);pPos.x+=mv.x;pPos.z+=mv.z;resolveCol(pPos);walkT+=dt*(sprint?2.4:1.5);}
 
     swimLake=getLake(pPos.x,pPos.z); swimming=!!swimLake;
@@ -947,6 +955,9 @@ function animate(){
   } else {
     buildPreview.visible = false;
   }
+
+  // building system + desire paths
+  if(typeof updateBuilding === 'function') updateBuilding(dt, moving, onGround, swimming);
 
   oceanMesh.position.y = SEA_Y + Math.sin(Date.now()*0.001)*0.04;
 
