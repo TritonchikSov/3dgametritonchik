@@ -7,97 +7,139 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { overflow: hidden; background: #87CEEB; }
     canvas { display: block; }
-    #ui {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: white;
-      font-family: Arial, sans-serif;
-      font-size: 14px;
-      text-shadow: 1px 1px 2px black;
-      text-align: center;
-    }
+
     #crosshair {
-      position: fixed;
-      top: 50%;
-      left: 50%;
+      position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      color: white;
-      font-size: 24px;
+      color: white; font-size: 24px;
       text-shadow: 1px 1px 2px black;
+      pointer-events: none; z-index: 10;
+    }
+    #ui {
+      position: fixed; bottom: 80px; left: 50%;
+      transform: translateX(-50%);
+      color: white; font-family: Arial; font-size: 13px;
+      text-shadow: 1px 1px 2px black; text-align: center;
       pointer-events: none;
     }
-  </style>
-</head>
-<body>
-  <div id="crosshair">+</div>
-  <div id="ui">WASD — движение &nbsp;|&nbsp; Мышь — обзор &nbsp;|&nbsp; E — инвентарь &nbsp;|&nbsp; 1-9 — слоты</div>
-
-  <!-- Hotbar -->
-  <div id="hotbar"></div>
-
-  <!-- Inventory overlay -->
-  <div id="inventory" style="display:none">
-    <div id="inv-panel">
-      <div id="inv-title">Инвентарь</div>
-      <div id="inv-grid"></div>
-      <div id="inv-hint">E — закрыть</div>
-    </div>
-  </div>
-
-  <style>
-    #hotbar {
-      position: fixed;
-      bottom: 16px;
-      left: 50%;
+    #hint-popup {
+      position: fixed; top: 40%; left: 50%;
       transform: translateX(-50%);
-      display: flex;
-      gap: 6px;
+      color: white; font-family: Arial; font-size: 14px;
+      background: rgba(0,0,0,0.55); padding: 6px 14px;
+      border-radius: 8px; pointer-events: none;
+      opacity: 0; transition: opacity 0.2s; z-index: 20;
+    }
+
+    /* ── Hotbar ── */
+    #hotbar {
+      position: fixed; bottom: 16px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 6px; z-index: 10;
     }
     .slot {
       width: 52px; height: 52px;
-      background: rgba(0,0,0,0.45);
+      background: rgba(0,0,0,0.5);
       border: 2px solid rgba(255,255,255,0.3);
       border-radius: 6px;
       display: flex; align-items: center; justify-content: center;
       color: white; font-size: 11px; font-family: Arial;
       cursor: pointer; position: relative;
       transition: border-color 0.1s;
+      user-select: none;
     }
-    .slot.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.6); }
+    .slot.active  { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.6); }
+    .slot.drag-over { border-color: #ffdd00; }
     .slot-num {
       position: absolute; top: 2px; left: 5px;
       font-size: 10px; color: rgba(255,255,255,0.5);
     }
-    .slot-icon { font-size: 22px; }
+    .slot-icon { font-size: 22px; line-height: 1; }
+    .slot-count {
+      position: absolute; bottom: 2px; right: 5px;
+      font-size: 10px; color: #fff;
+    }
+
+    /* ── Inventory ── */
     #inventory {
       position: fixed; inset: 0;
-      background: rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.65);
+      display: none; align-items: center; justify-content: center;
       z-index: 100;
     }
     #inv-panel {
-      background: rgba(30,30,30,0.95);
+      background: rgba(25,25,25,0.97);
       border: 2px solid rgba(255,255,255,0.2);
-      border-radius: 12px;
-      padding: 24px;
-      min-width: 340px;
+      border-radius: 12px; padding: 24px;
     }
     #inv-title {
       color: white; font-family: Arial; font-size: 18px;
-      text-align: center; margin-bottom: 16px;
+      text-align: center; margin-bottom: 12px;
     }
     #inv-grid {
       display: grid;
       grid-template-columns: repeat(9, 52px);
+      gap: 6px; margin-bottom: 10px;
+    }
+    #inv-hotbar-row {
+      display: grid;
+      grid-template-columns: repeat(9, 52px);
       gap: 6px;
+      border-top: 1px solid rgba(255,255,255,0.15);
+      padding-top: 10px;
     }
     #inv-hint {
-      color: rgba(255,255,255,0.4); font-family: Arial;
-      font-size: 12px; text-align: center; margin-top: 12px;
+      color: rgba(255,255,255,0.35); font-family: Arial;
+      font-size: 12px; text-align: center; margin-top: 10px;
+    }
+
+    /* ── Drag ghost ── */
+    #drag-ghost {
+      position: fixed; pointer-events: none;
+      font-size: 28px; z-index: 200;
+      transform: translate(-50%, -50%);
+      display: none;
+    }
+
+    /* ── Health bar ── */
+    #healthbar {
+      position: fixed; top: 16px; left: 16px;
+      font-family: Arial; color: white; font-size: 13px;
+      text-shadow: 1px 1px 2px black;
+    }
+    #health-track {
+      width: 160px; height: 12px;
+      background: rgba(0,0,0,0.4);
+      border-radius: 6px; margin-top: 4px; overflow: hidden;
+    }
+    #health-fill {
+      height: 100%; background: #e74c3c;
+      border-radius: 6px; transition: width 0.3s;
     }
   </style>
+</head>
+<body>
+  <div id="crosshair">+</div>
+  <div id="ui">WASD — движение &nbsp;|&nbsp; E — инвентарь &nbsp;|&nbsp; ЛКМ — добыть/съесть &nbsp;|&nbsp; 1-9 — слоты</div>
+  <div id="hint-popup"></div>
+
+  <div id="healthbar">
+    ❤️ Здоровье
+    <div id="health-track"><div id="health-fill" style="width:100%"></div></div>
+  </div>
+
+  <div id="hotbar"></div>
+
+  <div id="inventory">
+    <div id="inv-panel">
+      <div id="inv-title">Инвентарь</div>
+      <div id="inv-grid"></div>
+      <div id="inv-hotbar-row"></div>
+      <div id="inv-hint">E — закрыть &nbsp;|&nbsp; Перетаскивай предметы мышью</div>
+    </div>
+  </div>
+
+  <div id="drag-ghost"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="game.js"></script>
