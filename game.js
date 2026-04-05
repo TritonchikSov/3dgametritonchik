@@ -108,21 +108,24 @@ var bushTex = makeTex(32, function(ctx, s) {
 // ===================================================
 // TERRAIN  (island shape — edges drop below sea level)
 // ===================================================
-var ISLAND_R = 75; // radius of island
-var SEA_Y    = -2; // water surface Y
+var ISLAND_R = 80;
+var SEA_Y    = -1.5;
 
 function terrainY(x, z) {
   var d = Math.sqrt(x*x + z*z);
-  // island falloff — outside ISLAND_R terrain goes below sea
-  var island = 1 - Math.pow(Math.max(0, d / ISLAND_R), 2.5);
+  // smooth island falloff — coast starts at ~65, fully underwater at 85
+  var t = Math.max(0, Math.min(1, (d - 60) / 25));
+  var island = 1 - t*t*(3 - 2*t); // smoothstep
   var h = 0;
-  h += Math.sin(x*0.035)*Math.cos(z*0.035)*5;
-  h += Math.sin(x*0.08+1.3)*Math.cos(z*0.07+0.9)*2.5;
-  h += Math.sin(x*0.17+2.2)*Math.cos(z*0.14+1.6)*1.0;
-  h += Math.sin(x*0.34)*Math.cos(z*0.31)*0.4;
-  h = h * island - (1 - island) * 8; // pull edges down
+  h += Math.sin(x*0.035)*Math.cos(z*0.035)*4.5;
+  h += Math.sin(x*0.08+1.3)*Math.cos(z*0.07+0.9)*2.2;
+  h += Math.sin(x*0.17+2.2)*Math.cos(z*0.14+1.6)*0.9;
+  h += Math.sin(x*0.34)*Math.cos(z*0.31)*0.35;
+  // blend: inland = full height, coast = lerp to -3
+  h = h * island + (-3) * (1 - island);
   // flatten spawn area
-  if(d < 12) h *= (d/12)*(d/12);
+  var ds = Math.sqrt(x*x+z*z);
+  if(ds < 12) h *= (ds/12)*(ds/12);
   return h;
 }
 
@@ -263,36 +266,62 @@ for(var i=0;i<28;i++){
 }
 [[-3,4],[4,-3],[6,2],[-5,-4],[2,7],[-7,2],[5,5]].forEach(function(p){spawnStone(p[0],p[1]);});
 
-// ── Paths (dirt strips) ────────────────────────────
-var pathMat = new THREE.MeshLambertMaterial({map:sandTex, color:0xb8955a});
-var pathDefs = [
-  {x1:0,z1:0, x2:30,z2:20},
-  {x1:0,z1:0, x2:-25,z2:25},
-  {x1:0,z1:0, x2:20,z2:-30},
-  {x1:30,z1:20, x2:45,z2:10},
+// ── Flowers ────────────────────────────────────────
+var flowerColors=[0xff4466,0xffdd00,0xff8800,0xcc44ff,0xffffff];
+for(var fi=0;fi<80;fi++){
+  var fx,fz,ft=0;
+  do{fx=(Math.random()-.5)*120;fz=(Math.random()-.5)*120;ft++;}
+  while((!onIsland(fx,fz,12)||Math.sqrt(fx*fx+fz*fz)<5)&&ft<30);
+  var fgy=terrainY(fx,fz);
+  var col=flowerColors[Math.floor(Math.random()*flowerColors.length)];
+  // stem
+  var stem=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.22,4),new THREE.MeshLambertMaterial({color:0x228822}));
+  stem.position.set(fx,fgy+0.11,fz);
+  scene.add(stem);
+  // petals
+  var petal=new THREE.Mesh(new THREE.SphereGeometry(0.1,5,4),new THREE.MeshLambertMaterial({color:col}));
+  petal.position.set(fx,fgy+0.26,fz);
+  scene.add(petal);
+}
+
+// ── Blueprint item given at start — see slots[28] init in INVENTORY section
+
+// ── Paths — painted onto terrain vertices ──────────
+// We tint terrain vertices near path lines by modifying a vertex color attribute
+// Simple approach: flat dirt-colored plane segments hugging terrain exactly
+var pathMat = new THREE.MeshLambertMaterial({color:0xa07840, depthWrite:true});
+
+var pathRoutes = [
+  [[0,0],[22,18]],
+  [[0,0],[-20,22]],
+  [[0,0],[18,-25]],
 ];
-pathDefs.forEach(function(p){
-  var dx=p.x2-p.x1, dz=p.z2-p.z1;
+
+pathRoutes.forEach(function(route){
+  var x1=route[0][0],z1=route[0][1],x2=route[1][0],z2=route[1][1];
+  var dx=x2-x1, dz=z2-z1;
   var len=Math.sqrt(dx*dx+dz*dz);
-  var segs=Math.ceil(len/2);
-  for(var s=0;s<segs;s++){
-    var t=s/segs;
-    var px=p.x1+dx*t, pz=p.z1+dz*t;
+  var ang=Math.atan2(dx,dz);
+  var steps=Math.ceil(len/1.2);
+  for(var s=0;s<=steps;s++){
+    var f=s/steps;
+    var px=x1+dx*f, pz=z1+dz*f;
     var gy=terrainY(px,pz);
-    var seg=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.08,2.2),pathMat);
-    seg.position.set(px,gy+0.02,pz);
-    seg.rotation.y=Math.atan2(dx,dz);
+    // thin flat quad sitting exactly on terrain
+    var seg=new THREE.Mesh(new THREE.PlaneGeometry(1.6,1.4),pathMat);
+    seg.rotation.x=-Math.PI/2;
+    seg.rotation.z=ang;
+    seg.position.set(px, gy+0.03, pz);
     seg.receiveShadow=true;
     scene.add(seg);
   }
 });
 
-// ── Houses ─────────────────────────────────────────
+// ── Houses — 3 houses, spread far apart ────────────
 var houseDefs=[
-  {x:30,z:20,rot:0.3},
-  {x:-25,z:25,rot:-0.5},
-  {x:20,z:-30,rot:1.1},
-  {x:45,z:10,rot:0.0},
+  {x:22,z:18,rot:0.3},
+  {x:-20,z:22,rot:-0.5},
+  {x:18,z:-25,rot:1.1},
 ];
 houseDefs.forEach(function(h){ spawnHouse(h.x,h.z,h.rot); });
 
@@ -349,11 +378,12 @@ function spawnChest(cx,cz){
   lock.position.set(0,0.5,-0.28); g.add(lock);
   g.position.set(cx,gy,cz);
   scene.add(g);
-  var loot=Math.random()<0.5
-    ? {name:'Бутылка воды',icon:'🍶',count:1,water:50}
-    : {name:'Кусок мяса',icon:'🥩',count:1,food:50};
-  var obj={group:g,x:cx,z:cz,r:0.6,type:'chest',loot:loot,
+  var obj={group:g,x:cx,z:cz,r:0.6,type:'chest',
     onHit:function(){
+      // random loot on open
+      var loot=Math.random()<0.5
+        ? {name:'Бутылка воды',icon:'🍶',count:1,water:50}
+        : {name:'Кусок мяса',icon:'🥩',count:1,food:50};
       addItem({name:loot.name,icon:loot.icon,count:1});
       if(loot.water) addWater(loot.water);
       if(loot.food)  addFood(loot.food);
@@ -510,6 +540,7 @@ function addWater(v){ S.water =Math.min(100,S.water+v); syncBars(); }
 // ===================================================
 var slots=new Array(36).fill(null);
 slots[27]={name:'Кремень',icon:'🪨',count:1,tool:true};
+slots[28]={name:'План постройки',icon:'📋',count:1,blueprint:true};
 
 function addItem(item){
   if(!item.tool){
@@ -534,12 +565,34 @@ function consumeItem(name,n){
 var RECIPES=[
   {name:'Кирка',icon:'⛏️',tool:true,count:1,color:0x999999,needs:[{name:'Камень',count:2},{name:'Дерево',count:2}]},
   {name:'Топор',icon:'🪓',tool:true,count:1,color:0x8B4513,needs:[{name:'Камень',count:1},{name:'Дерево',count:3}]},
+  {name:'Пол',icon:'🟫',count:4,build:true,needs:[{name:'Дерево',count:2}]},
 ];
+
+// placed build blocks
+var buildBlocks=[];
+function placeBuildBlock(){
+  // place a 1x1 brown floor tile in front of player
+  var fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  var bx=pPos.x+fwd.x*2.5, bz=pPos.z+fwd.z*2.5;
+  var by=terrainY(bx,bz);
+  var mesh=new THREE.Mesh(
+    new THREE.BoxGeometry(1,0.12,1),
+    new THREE.MeshLambertMaterial({color:0x8B4513})
+  );
+  mesh.position.set(bx,by+0.06,bz);
+  mesh.receiveShadow=true;
+  scene.add(mesh);
+  buildBlocks.push(mesh);
+  // consume 1 floor item
+  consumeItem('Пол',1);
+  renderAll();
+  showHint('🟫 Пол размещён');
+}
 
 function tryCraft(r){
   for(var i=0;i<r.needs.length;i++){if(countItem(r.needs[i].name)<r.needs[i].count){showHint('Нужно: '+r.needs[i].count+'× '+r.needs[i].name);return;}}
   r.needs.forEach(function(n){consumeItem(n.name,n.count);});
-  addItem({name:r.name,icon:r.icon,tool:true,count:1});
+  addItem({name:r.name,icon:r.icon,count:r.count,tool:!!r.tool,build:!!r.build});
   renderAll(); renderCraft();
 }
 
@@ -671,8 +724,14 @@ document.addEventListener('mousemove',function(e){
   pitch=Math.max(-1.1,Math.min(1.1,pitch));
 });
 document.addEventListener('mousedown',function(e){
-  if(e.button!==0||invOpen) return;
+  if(invOpen) return;
   if(document.pointerLockElement!==renderer.domElement) return;
+  if(e.button===2){ // right click — place build block
+    var h=slots[activeSlot];
+    if(h&&h.build) placeBuildBlock();
+    return;
+  }
+  if(e.button!==0) return;
   tryAction();
 });
 
@@ -762,6 +821,8 @@ function tryAction(){
 
 var hintTick=0;
 function updateHint(){
+  var hh=slots[activeSlot];
+  if(hh&&hh.build){ showHint('🟫 ПКМ — разместить '+hh.name); return; }
   var obj=getAimed(); if(!obj) return;
   var map={tree:'🪵 ЛКМ — рубить (Кремень/Топор)',rock:'🪨 ЛКМ — добыть (Кремень/Кирка)',bush:'🍓 ЛКМ — съесть ягоды',pickup:'🪨 ЛКМ — подобрать камень',chest:'📦 ЛКМ — открыть ящик'};
   if(map[obj.type]) showHint(map[obj.type]);
